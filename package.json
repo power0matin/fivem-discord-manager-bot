@@ -1,0 +1,40 @@
+{
+  "name": "nox-rp-stream-notifier",
+  "version": "1.0.0",
+  "description": "Discord bot that monitors Kick & Twitch for GTA V streams with 'Nox RP' in the title and posts @here + stream link in a Discord channel.",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5"
+  },
+  "license": "MIT",
+  "keywords": [
+    "discord",
+    "discord-bot",
+    "discord.js",
+    "twitch",
+    "kick",
+    "gta-v",
+    "gtav",
+    "roleplay",
+    "rp",
+    "stream-notifier",
+    "oauth2"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YOUR_GITHUB_USERNAME/nox-rp-stream-notifier.git"
+  },
+  "bugs": {
+    "url": "https://github.com/YOUR_GITHUB_USERNAME/nox-rp-stream-notifier/issues"
+  },
+  "homepage": "https://github.com/YOUR_GITHUB_USERNAME/nox-rp-stream-notifier#readme"
+}
