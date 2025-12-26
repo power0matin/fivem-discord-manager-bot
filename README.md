@@ -5,34 +5,38 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
 [![Discord](https://img.shields.io/badge/Discord-Bot-5865F2)](#)
 
-A **Discord bot** that monitors **Twitch** and **Kick** streams and posts **alerts + stream links** when a stream matches your filters.
+A **Discord bot** that monitors **Twitch** and **Kick** streams and posts **LIVE alerts + stream links** when streams match your filters.
 
-> Designed for reliable, curated monitoring (streamer lists), with optional discovery mode for advanced use.
-
+> Designed for reliable curated monitoring (streamer lists) with optional discovery mode for advanced usage.
 
 ## Highlights
 
 ### Default (GTA RP-ready)
-- **Game/Category** must be **Grand Theft Auto V**
+
+- **Game/Category** must be **Grand Theft Auto V** (configurable)
 - **Title** must match a **keyword/regex**
   - Default: `nox\\s*rp`
 
 ### What you get
+
 - Monitors **Twitch** + **Kick**
 - Filters by **Game/Category** + **Title regex**
-- Posts alerts in a specific channel with:
+- Posts alerts to a notify channel with:
   - `@here` (toggleable)
   - Optional **Discord user mention** per streamer
   - Stream link
-- One-message lifecycle:
+- One-message lifecycle per streamer:
   - LIVE → post alert once
   - Still LIVE → no spam
   - OFFLINE → delete prior alert
+- Optional **Live Role** while streaming:
+  - On LIVE → add a configured role to the streamer (based on stored `discordId`)
+  - On OFFLINE (after the alert message is deleted) → remove the role
 - Persistent storage via `data.json` (auto-created; gitignored)
 - Health visibility (`.health`): last tick, failures, retry/backoff windows
 
-
 ## Table of Contents
+
 - [Quick Start](#quick-start)
 - [First-Time Setup (Recommended)](#first-time-setup-recommended)
 - [Command Cheat Sheet](#command-cheat-sheet)
@@ -49,10 +53,10 @@ A **Discord bot** that monitors **Twitch** and **Kick** streams and posts **aler
 - [License](#license)
 - [Credits](#credits)
 
-
 ## Demo
 
 ### Example alert message
+
 ```text
 @here 🟢 **<@DiscordUserId>** is LIVE on **Kick**
 https://kick.com/amirjavankabir
@@ -60,28 +64,18 @@ https://kick.com/amirjavankabir
 
 > 🟢 Kick / 🟣 Twitch
 
-### Prefix command examples
-
-```text
-.k add amirjavankabir @AmirJavan
-✅ | Streamer amirjavankabir added to Kick list. (ID: 917523060733644840)
-
-.t add miinaaw 857045672989818892
-✅ | Streamer miinaaw added to Twitch list. (ID: 857045672989818892)
-```
-
-
 ## Quick Start
 
 ### Prerequisites
 
-* Node.js **18+**
-* Discord bot:
+- Node.js **18+**
+- Discord bot:
 
-  * **Bot Token**
-  * **Application ID (Client ID)**
-* Twitch Developer App (`Client ID` + `Client Secret`) *(optional if you want Twitch)*
-* Kick credentials (`Client ID` + `Client Secret`) *(optional if you want Kick)*
+  - **Bot Token**
+  - **Application ID (Client ID)**
+
+- Twitch Developer App (`Client ID` + `Client Secret`) _(optional if you want Twitch)_
+- Kick credentials (`Client ID` + `Client Secret`) _(optional if you want Kick)_
 
 ### Install
 
@@ -103,7 +97,7 @@ Edit `.env` and fill in your secrets (see [Configuration](#configuration)).
 node src/slash/register.js
 ```
 
-> Tip: For fastest iteration, set `DISCORD_GUILD_ID` in `.env` to deploy commands to one guild instantly.
+Tip: For fastest iteration, set `DISCORD_GUILD_ID` in `.env` to deploy commands to one guild instantly.
 
 ### Run
 
@@ -113,148 +107,147 @@ node src/index.js
 
 On first run, the bot will create `data.json` and begin monitoring.
 
+> Note: `DISCORD_NOTIFY_CHANNEL_ID` is optional if you plan to configure the channel via `/setup` (recommended).
 
 ## First-Time Setup (Recommended)
 
-After registering slash commands, run:
+After registering slash commands:
 
-1. In your Discord server:
+1. In your Discord server, run:
 
-* `/setup`
+- `/setup`
 
 2. The interactive wizard guides you through:
 
-* Notify channel (where alerts should be posted)
-* `@here` toggle
-* Regex filter
-* Scan interval
-* Discovery mode options *(optional)*
+- Notify channel (where alerts should be posted)
+- `@here` toggle
+- Regex filter
+- Scan interval
+- Discovery mode options _(optional)_
 
 3. Add streamers:
 
-* via prefix commands now (and optionally extend slash commands later)
-
+- via prefix commands (and optionally extend slash commands later)
 
 ## Command Cheat Sheet
 
 ### General
 
-* `.help` — help menu
-* `.config` — show current settings
-* `.health` — API/backoff status + last tick info
-* `.export [all|kick|twitch]` — export settings + lists (no secrets)
-* `.tick` — force an immediate scan
+- `.help` — help menu
+- `.config` — show current settings
+- `.health` — API/backoff status + last tick info
+- `.export [all|kick|twitch]` — export settings + lists (no secrets)
+- `.tick` — force an immediate scan
 
 ### Settings
 
-* `.set channel <#channel|channelId|this>`
-* `.set mentionhere <on|off>`
-* `.set regex <pattern>`
-* `.set interval <seconds>` (10..3600)
-* `.set discovery <on|off>`
-* `.set discoveryTwitchPages <1..50>`
-* `.set discoveryKickLimit <1..100>`
-* `.set twitchGameId <game_id>`
-* `.set kickCategoryName <name>`
-* `.refresh kickCategory` — force re-resolve Kick category id
+- `.set channel <#channel|channelId|this>`
+- `.set mentionhere <on|off>`
+- `.set regex <pattern>`
+- `.set interval <seconds>` (10..3600)
+- `.set discovery <on|off>`
+- `.set discoveryTwitchPages <1..50>`
+- `.set discoveryKickLimit <1..100>`
+- `.set twitchGameId <game_id>`
+- `.set kickCategoryName <name>`
+- `.refresh kickCategory` — force re-resolve Kick category id
 
 ### Kick list
 
-* Add:
+- Add:
 
-  * `.k add <kickSlug> [@discordUser|discordUserId]`
-  * shortcut: `.k <kickSlug> [@discordUser|discordUserId]`
-* Remove: `.k remove <kickSlug>`
-* List: `.k list`
-* Status (debug): `.k status <kickSlug>`
-* Bulk add: `.k addmany <slug1> <slug2> ...`
-* Set/clear mention: `.k setmention <kickSlug> <@user|id|none>`
-* Clear list: `.k clear --yes`
+  - `.k add <kickSlug> [@discordUser|discordUserId]`
+  - Shortcut: `.k <kickSlug> [@discordUser|discordUserId]`
+
+- Remove: `.k remove <kickSlug>`
+- List: `.k list`
+- Status (debug): `.k status <kickSlug>`
+- Bulk add: `.k addmany <slug1> <slug2> ...`
+- Set/clear mention: `.k setmention <kickSlug> <@user|id|none>`
+- Clear list: `.k clear --yes`
 
 ### Twitch list
 
-* Add:
+- Add:
 
-  * `.t add <twitchLogin> [@discordUser|discordUserId]`
-  * shortcut: `.t <twitchLogin> [@discordUser|discordUserId]`
-* Remove: `.t remove <twitchLogin>`
-* List: `.t list`
-* Status (debug): `.t status <twitchLogin>`
-* Bulk add: `.t addmany <login1> <login2> ...`
-* Set/clear mention: `.t setmention <twitchLogin> <@user|id|none>`
-* Clear list: `.t clear --yes`
+  - `.t add <twitchLogin> [@discordUser|discordUserId]`
+  - Shortcut: `.t <twitchLogin> [@discordUser|discordUserId]`
 
+- Remove: `.t remove <twitchLogin>`
+- List: `.t list`
+- Status (debug): `.t status <twitchLogin>`
+- Bulk add: `.t addmany <login1> <login2> ...`
+- Set/clear mention: `.t setmention <twitchLogin> <@user|id|none>`
+- Clear list: `.t clear --yes`
 
 ## Mention support (important)
 
-When adding a streamer, you can provide the Discord user in **any** of these formats:
+When adding a streamer, you can provide the Discord user in any of these formats:
 
-* real mention: `@User`
-* raw ID: `123456789012345678`
-* mention markup: `<@123456789012345678>`
+- Real mention: `@User` (must be selected from Discord autocomplete)
+- Raw ID: `123456789012345678`
+- Mention markup: `<@123456789012345678>`
 
-The bot stores the Discord user ID and mentions them in every alert.
+The bot stores the Discord user ID and uses it in alert messages.
 
-> Tip: If you typed `@username` but didn’t select the user from Discord autocomplete, it may not be a real mention. Using the raw ID always works.
-
+Tip: If you typed `@username` but didn’t select the user from autocomplete, it might not be a real mention. Using raw ID always works.
 
 ## How It Works
 
-This bot uses a **polling loop** (every `CHECK_INTERVAL_SECONDS`) to:
+This bot uses a polling loop (every `CHECK_INTERVAL_SECONDS`) to:
 
-1. Fetch live stream info for each streamer in your **Kick** and **Twitch** lists
+1. Fetch live stream info for each streamer in your Kick and Twitch lists
 2. Confirm the stream matches:
 
-   * **Game/Category == GTA V** *(configurable)*
-   * **Title matches `KEYWORD_REGEX`**
-3. Ensure exactly one "LIVE" alert message exists:
+   - Game/Category == GTA V _(configurable)_
+   - Title matches `KEYWORD_REGEX`
 
-   * Create if missing
-   * Keep if still live
-   * Delete when offline
+3. Ensure exactly one LIVE alert message exists per streamer:
 
+   - Create if missing
+   - Keep if still live
+   - Delete when offline
 
 ## Configuration
 
 This bot uses:
 
-* **Environment variables** for secrets and one-time defaults
-* **data.json** for persistent runtime settings and streamer lists
+- Environment variables for secrets and one-time defaults
+- `data.json` for persistent runtime settings and streamer lists
 
 On first run, env vars are copied into `data.json` as defaults.
 After that, `data.json` is treated as the source of truth (so you can change settings via Discord commands), unless you enable legacy overwrite mode.
 
 ### Credentials (official links)
 
-```text
 Discord Developer Portal (create app, get Token, get Client ID):
-https://discord.com/developers/applications
+[https://discord.com/developers/applications](https://discord.com/developers/applications)
 
 Twitch - Register your app (Client ID / Secret):
-https://dev.twitch.tv/docs/authentication/register-app
+[https://dev.twitch.tv/docs/authentication/register-app](https://dev.twitch.tv/docs/authentication/register-app)
 Twitch Developer Console:
-https://dev.twitch.tv/console/apps
-```
+[https://dev.twitch.tv/console/apps](https://dev.twitch.tv/console/apps)
 
-> Note: Kick credentials depend on your Kick developer access/process. Fill `KICK_CLIENT_ID` and `KICK_CLIENT_SECRET` as provided for your app.
+Kick credentials depend on your Kick developer access/process. Fill `KICK_CLIENT_ID` and `KICK_CLIENT_SECRET` as provided for your app.
 
 ### Required
 
-| Variable                    | Description                                                 |
-| --------------------------- | ----------------------------------------------------------- |
-| `DISCORD_TOKEN`             | Your Discord bot token                                      |
-| `DISCORD_CLIENT_ID`         | Discord Application ID (used to deploy slash commands)      |
-| `DISCORD_NOTIFY_CHANNEL_ID` | Channel ID where alerts will be posted (default on 1st run) |
-| `TWITCH_CLIENT_ID`          | Twitch app client ID *(required for Twitch support)*        |
-| `TWITCH_CLIENT_SECRET`      | Twitch app client secret *(required for Twitch support)*    |
-| `KICK_CLIENT_ID`            | Kick app client ID *(required for Kick support)*            |
-| `KICK_CLIENT_SECRET`        | Kick app client secret *(required for Kick support)*        |
+| Variable               | Description                                            |
+| ---------------------- | ------------------------------------------------------ |
+| `DISCORD_TOKEN`        | Your Discord bot token                                 |
+| `DISCORD_CLIENT_ID`    | Discord Application ID (used to deploy slash commands) |
+| `TWITCH_CLIENT_ID`     | Twitch app client ID _(required for Twitch support)_   |
+| `TWITCH_CLIENT_SECRET` | Twitch app client secret _(required for Twitch)_       |
+| `KICK_CLIENT_ID`       | Kick app client ID _(required for Kick support)_       |
+| `KICK_CLIENT_SECRET`   | Kick app client secret _(required for Kick)_           |
 
-### Recommended (development)
+### Optional (recommended)
 
-| Variable           | Default | Description                                                          |
-| ------------------ | :-----: | -------------------------------------------------------------------- |
-| `DISCORD_GUILD_ID` |  (none) | If set, slash commands deploy to that guild for instant availability |
+| Variable                    | Default | Description                                                                            |
+| --------------------------- | :-----: | -------------------------------------------------------------------------------------- |
+| `DISCORD_NOTIFY_CHANNEL_ID` | (none)  | Notify channel ID used as a first-run default (recommended: configure via `/setup`)    |
+| `DISCORD_GUILD_ID`          | (none)  | If set, slash commands deploy to that guild for instant availability                   |
+| `STREAMER_LIVE_ROLE_ID`     | (none)  | Role to grant to streamers while live (requires Manage Roles + correct role hierarchy) |
 
 ### Access control
 
@@ -277,7 +270,7 @@ These env vars are copied into `data.json` on first run. After that, prefer chan
 
 ### Discovery mode (optional)
 
-Discovery mode attempts to find streams without a curated list. This increases API usage and can be less reliable (especially on Kick due to listing constraints).
+Discovery mode attempts to find streams without a curated list. This increases API usage and can be less reliable.
 
 | Variable                 | Default | Description                                   |
 | ------------------------ | :-----: | --------------------------------------------- |
@@ -290,7 +283,6 @@ Discovery mode attempts to find streams without a curated list. This increases A
 | Variable           | Default | Description                                                                              |
 | ------------------ | :-----: | ---------------------------------------------------------------------------------------- |
 | `ENV_OVERRIDES_DB` | `false` | When `true`, env vars overwrite `data.json` settings on every startup (legacy behavior). |
-
 
 ## Discord Commands
 
@@ -307,35 +299,41 @@ Prefix `.help` is public.
 
 Interactive setup wizard:
 
-* sets notify channel
-* toggles `@here`
-* configures regex/interval/discovery options
+- sets notify channel
+- toggles `@here`
+- configures regex/interval/discovery options
 
-> If you don’t see `/setup`, check [Troubleshooting](#troubleshooting).
-
+If you don’t see `/setup`, check [Troubleshooting](#troubleshooting).
 
 ## Permissions & Intents
 
 ### Discord Intents (required)
 
-Enable **Message Content Intent** in Discord Developer Portal (because this bot uses prefix commands).
+- **Message Content Intent** must be enabled in Discord Developer Portal (prefix commands).
+- **Server Members Intent** may be required if you use `STREAMER_LIVE_ROLE_ID` (role add/remove relies on member fetch).
 
 ### Required permissions (in notify channel)
 
-* View Channel
-* Send Messages
-* Read Message History
-* **Mention Everyone** *(required if you want `@here` to ping)*
-* **Manage Messages** *(required to delete the LIVE alert when the streamer goes offline)*
+- View Channel
+- Send Messages
+- Read Message History
+- Mention Everyone _(required if you want `@here`)_
+- Manage Messages _(required to delete the LIVE alert when the streamer goes offline)_
+
+### Required permissions for Live Role (optional)
+
+If using `STREAMER_LIVE_ROLE_ID`:
+
+- Bot needs **Manage Roles**
+- The configured role must be **below the bot’s highest role** in role hierarchy
 
 ### Slash commands visibility
 
 Your bot must be invited with:
 
-* OAuth2 scope: `applications.commands`
+- OAuth2 scope: `applications.commands`
 
 If you only invited it as `bot` without `applications.commands`, slash commands will not show.
-
 
 ## Deploy
 
@@ -357,21 +355,19 @@ pm2 startup
 ### Option B: Docker (optional template)
 
 If you want Docker support, add a `Dockerfile` and `.dockerignore`.
-(PRs welcome — see [Roadmap](#roadmap).)
-
+PRs welcome — see [Roadmap](#roadmap).
 
 ## Data & Storage
 
 The bot stores persistent state in `data.json`:
 
-* kick/twitch streamer lists
-* mapping to Discord user IDs
-* active live messages (message IDs + session keys)
-* health/backoff state
-* runtime settings
+- Kick/Twitch streamer lists
+- Mapping to Discord user IDs
+- Active live messages (message IDs + session keys)
+- Health/backoff state
+- Runtime settings
 
 `data.json` is intentionally in `.gitignore`.
-
 
 ## Troubleshooting
 
@@ -385,10 +381,10 @@ Most common causes:
 node src/slash/register.js
 ```
 
-2. Global deploy delay (recommended: guild deploy for development):
+2. Global deploy delay (recommended: guild deploy for development)
 
-* set `DISCORD_GUILD_ID` in `.env`
-* run again:
+- set `DISCORD_GUILD_ID` in `.env`
+- run again:
 
 ```bash
 node src/slash/register.js
@@ -396,7 +392,7 @@ node src/slash/register.js
 
 3. Bot was not invited with `applications.commands` scope.
 
-#### Reset everything (safe recovery)
+Reset everything (safe recovery):
 
 ```bash
 node src/slash/purge-commands.js
@@ -406,29 +402,35 @@ node src/slash/list-commands.js
 
 ### Bot doesn’t respond to prefix commands
 
-* Ensure **Message Content Intent** is enabled
-* Check `PREFIX` in `.env`
-* Confirm bot has permission to read/send messages in the channel
+- Ensure **Message Content Intent** is enabled
+- Check `PREFIX` in `.env`
+- Confirm bot has permission to read/send messages in the channel
 
 ### `@here` does not ping
 
-* Bot needs **Mention Everyone** in that channel
-* Or disable via `/setup` / `.set mentionhere off`
+- Bot needs **Mention Everyone** in that channel
+- Or disable via `/setup` / `.set mentionhere off`
 
 ### Live message doesn’t delete when streamer goes offline
 
-* Bot needs **Manage Messages** in the notify channel
-* If you changed notify channel ID, restart the bot
-* If someone manually deleted the alert message, the bot recreates it next scan
+- Bot needs **Manage Messages** in the notify channel
+- If someone manually deleted the alert message, the bot treats it as deleted and updates state next scan
+
+### Live role not assigned/removed
+
+If using `STREAMER_LIVE_ROLE_ID`:
+
+- Bot needs **Manage Roles**
+- Role must be below bot’s highest role
+- If the streamer has no stored `discordId`, role operations are skipped
 
 ### Twitch/Kick alerts not working
 
-* Confirm `Client ID/Secret` values in `.env`
-* Increase `CHECK_INTERVAL_SECONDS` (e.g., 120–180) to reduce rate limits
-* Verify stream category is **GTA V** and the title matches your regex
-* Use `.k status <slug>` or `.t status <login>` to debug matching
-* Use `.health` to see backoff and last errors
-
+- Confirm `Client ID/Secret` values in `.env`
+- Increase `CHECK_INTERVAL_SECONDS` (e.g., 120–180) to reduce rate limits
+- Verify stream category is GTA V and title matches your regex
+- Use `.k status <slug>` or `.t status <login>` to debug matching
+- Use `.health` to see backoff and last errors
 
 ## FAQ
 
@@ -436,30 +438,28 @@ node src/slash/list-commands.js
 
 Yes.
 
-* Twitch: change `TWITCH_GTA5_GAME_ID`
-* Kick: change `KICK_GTA_CATEGORY_NAME`
+- Twitch: change `TWITCH_GTA5_GAME_ID`
+- Kick: change `KICK_GTA_CATEGORY_NAME`
 
 ### Can I monitor multiple keywords?
 
 Yes. Example:
 
-* `KEYWORD_REGEX=(nox\\s*rp|my\\s*event|tournament)`
+- `KEYWORD_REGEX=(nox\\s*rp|my\\s*event|tournament)`
 
 ### Can I run it in multiple Discord servers?
 
 Not yet out-of-the-box. See [Roadmap](#roadmap).
 
-
 ## Roadmap
 
-* [ ] Multi-server configuration (per-guild settings & channels)
-* [ ] Docker support
-* [x] Slash commands (Discord interactions)
-* [ ] Expand slash commands beyond `/setup` (add/list/remove streamers, health, config)
-* [ ] Web dashboard (optional)
-* [ ] Webhook/event-driven alerts where possible
-* [ ] Additional platforms (YouTube, Trovo, etc.)
-
+- [ ] Multi-server configuration (per-guild settings & channels)
+- [ ] Docker support
+- [x] Slash commands (Discord interactions)
+- [ ] Expand slash commands beyond `/setup` (add/list/remove streamers, health, config)
+- [ ] Web dashboard (optional)
+- [ ] Webhook/event-driven alerts where possible
+- [ ] Additional platforms (YouTube, Trovo, etc.)
 
 ## Contributing
 
@@ -480,30 +480,27 @@ git commit -m "feat: add ..."
 
 4. Push and open a Pull Request
 
-### Guidelines
+Guidelines:
 
-* Never commit `.env`, tokens, or secrets
-* Keep changes focused and documented
-* Update README if behavior changes
-
+- Never commit `.env`, tokens, or secrets
+- Keep changes focused and documented
+- Update README if behavior changes
 
 ## Security
 
-If you discover a security issue, please do **not** open a public issue.
+If you discover a security issue, please do not open a public issue.
 Create a private report or contact the maintainer.
 
 See: [SECURITY.md](SECURITY.md)
-
 
 ## License
 
 MIT — see [LICENSE](LICENSE)
 
-
 ## Credits
 
 Built with:
 
-* [discord.js](https://discord.js.org/)
-* Twitch Helix API
-* Kick API
+- [discord.js](https://discord.js.org/)
+- Twitch Helix API
+- Kick API
