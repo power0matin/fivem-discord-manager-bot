@@ -36,31 +36,17 @@ function keyOf(interaction) {
   return `${interaction.guildId}:${interaction.user.id}`;
 }
 
-function normalizeName(s) {
-  return String(s ?? "")
-    .trim()
-    .toLowerCase();
-}
-
-function safeStr(v) {
-  return String(v ?? "").trim();
-}
+const {
+  normalizeName,
+  safeStr,
+  clampInt,
+  compileRegexOrNull,
+} = require("../validation");
 
 function truncate(str, max) {
   const s = safeStr(str);
   if (s.length <= max) return s;
   return s.slice(0, Math.max(0, max - 1)) + "…";
-}
-
-function compileRegexOrNull(pattern) {
-  const p = String(pattern ?? "").trim();
-  if (!p) return null;
-  if (p.length > 200) return null;
-  try {
-    return new RegExp(p, "i");
-  } catch {
-    return null;
-  }
 }
 
 async function hasBotAccessInteraction(interaction) {
@@ -110,12 +96,6 @@ function formatBool(v) {
 
 function fmtChannel(chId) {
   return chId ? `<#${chId}>` : "`(not set)`";
-}
-
-function clampInt(n, min, max, fallback) {
-  const x = Number(n);
-  if (!Number.isFinite(x)) return fallback;
-  return Math.max(min, Math.min(max, Math.floor(x)));
 }
 
 async function validateDraft(client, guild, draft) {
@@ -922,6 +902,9 @@ async function handleComponent(interaction) {
 
       const db = await loadDb();
       const oldChannelId = db.settings?.notifyChannelId || "";
+      const oldIntervalSeconds = Number(
+        db.settings?.checkIntervalSeconds || 60
+      );
 
       // Clamp & validate at save time
       const draft = session.draft;
@@ -987,6 +970,21 @@ async function handleComponent(interaction) {
       }
 
       await saveDb(db).catch(() => null);
+
+      // Notify host process to apply runtime changes immediately (e.g., interval)
+      const newChannelId = db.settings?.notifyChannelId || "";
+      const newIntervalSeconds = Number(
+        db.settings?.checkIntervalSeconds || 60
+      );
+
+      await opts.onSettingsSaved?.({
+        channelChanged: Boolean(oldChannelId && oldChannelId !== newChannelId),
+        intervalChanged: oldIntervalSeconds !== newIntervalSeconds,
+        oldChannelId,
+        newChannelId,
+        oldIntervalSeconds,
+        newIntervalSeconds,
+      });
 
       await interaction.editReply("✅ Saved successfully.");
 
@@ -1095,7 +1093,7 @@ async function handleModal(interaction) {
   }
 }
 
-async function handleSetupInteraction(interaction) {
+async function handleSetupInteraction(interaction, opts = {}) {
   if (interaction.isChatInputCommand()) {
     if (interaction.commandName !== "setup") return false;
     await handleChatInput(interaction);
@@ -1110,7 +1108,7 @@ async function handleSetupInteraction(interaction) {
 
   if (interaction.isButton() || interaction.isAnySelectMenu()) {
     if (!String(interaction.customId || "").startsWith("setup:")) return false;
-    await handleComponent(interaction);
+    await handleComponent(interaction, opts);
     return true;
   }
 

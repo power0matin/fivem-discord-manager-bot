@@ -55,17 +55,33 @@ class KickClient {
   }
 
   async _get(path, params) {
+    const doRequest = async (token) => {
+      const resp = await axios.get(`${KICK_API_BASE}${path}`, {
+        params, // can be URLSearchParams or object
+        timeout: 15_000,
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return resp.data;
+    };
+
     const token = await this._getAppToken();
 
-    const resp = await axios.get(`${KICK_API_BASE}${path}`, {
-      params, // can be URLSearchParams or object
-      timeout: 15_000,
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    try {
+      return await doRequest(token);
+    } catch (err) {
+      const status = err?.response?.status;
 
-    return resp.data;
+      // If token became invalid, refresh once and retry once.
+      if (status === 401 || status === 403) {
+        this._token = null;
+        this._tokenExpiresAt = 0;
+
+        const token2 = await this._getAppToken();
+        return await doRequest(token2);
+      }
+
+      throw err;
+    }
   }
 
   /**

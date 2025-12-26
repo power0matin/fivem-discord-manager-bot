@@ -15,6 +15,8 @@ const { KickClient } = require("./kick");
 const { TwitchClient } = require("./twitch");
 const { handleSetupInteraction } = require("./slash/setup");
 
+const { ensureRoleAdded, ensureRoleRemoved } = require("./streamerRole");
+
 /* -------------------------- small utilities -------------------------- */
 
 // Sleep helper for retry loops.
@@ -94,22 +96,13 @@ function chunkArray(arr, size) {
   return out;
 }
 
-function normalizeName(s) {
-  return String(s ?? "")
-    .trim()
-    .toLowerCase();
-}
-
-function compileRegexOrFallback(pattern, fallback = /nox\s*rp/i) {
-  const p = String(pattern ?? "").trim();
-  if (!p) return fallback;
-  if (p.length > 200) return fallback;
-  try {
-    return new RegExp(p, "i");
-  } catch {
-    return fallback;
-  }
-}
+const {
+  normalizeName,
+  safeStr,
+  parseOnOff,
+  compileRegexOrFallback,
+  validateRegexPattern,
+} = require("./validation");
 
 async function hasBotAccess(message) {
   try {
@@ -171,10 +164,6 @@ const ICONS = {
   KICK: "🟢",
   TWITCH: "🟣",
 };
-
-function safeStr(v) {
-  return String(v ?? "").trim();
-}
 
 function truncate(str, max) {
   const s = safeStr(str);
@@ -409,9 +398,31 @@ const ui = {
 
 /* ----------------------------- notifier ----------------------------- */
 
+// Cache notify channel to avoid repeated Discord API fetches (especially per-streamer)
+const NOTIFY_CHANNEL_CACHE_TTL_MS = 30_000;
+const notifyChannelCache = {
+  channelId: null,
+  channel: null,
+  fetchedAt: 0,
+};
+
+function invalidateNotifyChannelCache() {
+  notifyChannelCache.channelId = null;
+  notifyChannelCache.channel = null;
+  notifyChannelCache.fetchedAt = 0;
+}
+
 async function fetchNotifyChannel(client, db) {
   const channelId = db?.settings?.notifyChannelId;
   if (!channelId) return null;
+
+  const now = Date.now();
+  const cacheHit =
+    notifyChannelCache.channelId === channelId &&
+    notifyChannelCache.channel &&
+    now - notifyChannelCache.fetchedAt < NOTIFY_CHANNEL_CACHE_TTL_MS;
+
+  if (cacheHit) return notifyChannelCache.channel;
 
   const channel = await client.channels.fetch(channelId).catch((err) => {
     console.error(
@@ -424,6 +435,10 @@ async function fetchNotifyChannel(client, db) {
   if (!channel) return null;
   if (!("send" in channel)) return null;
   if (channel.type === ChannelType.DM) return null;
+
+  notifyChannelCache.channelId = channelId;
+  notifyChannelCache.channel = channel;
+  notifyChannelCache.fetchedAt = now;
 
   return channel;
 }
@@ -501,6 +516,9 @@ async function deleteNotifyMessage(client, db, messageId) {
     .delete(messageId)
     .then(() => true)
     .catch((err) => {
+      // Unknown Message (already deleted) => treat as success
+      if (err?.code === 10008) return true;
+
       console.error(
         "[Discord] Failed to delete notify message (need Manage Messages or message exists?):",
         err?.message ?? err
@@ -519,6 +537,9 @@ async function main() {
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
+
+      // Needed to reliably fetch members for role add/remove
+      GatewayIntentBits.GuildMembers,
     ],
   });
 
@@ -543,6 +564,9 @@ async function main() {
     const force = Boolean(config.envOverridesDb);
 
     const setIfMissing = (obj, key, value) => {
+      // Do not write undefined into DB (important now that notifyChannelId is optional)
+      if (value === undefined) return;
+
       if (
         force ||
         obj[key] === null ||
@@ -597,6 +621,7 @@ async function main() {
   let tickRunning = false;
   let intervalHandle = null;
   let healthDirty = false;
+  let dbDirty = false; // DB changed during tick; defer save to end-of-tick
 
   // Build fast lookup maps
   const buildKickMetaMap = () => {
@@ -742,9 +767,11 @@ async function main() {
       const id = await kick.findCategoryIdByName(
         db.settings.kickGtaCategoryName
       );
+
       db.settings.kickGtaCategoryId = id;
       db.settings.kickGtaCategoryResolvedAt = now;
-      await saveDb(db);
+
+      dbDirty = true; // defer persistence to end-of-tick
       setPlatformSuccess("kick");
       return id;
     } catch (err) {
@@ -776,6 +803,20 @@ async function main() {
 
     const prev = active[streamerKey];
 
+    // Always ensure "live role" while stream is live (even if message already exists)
+    if (config.streamerLiveRoleId && payload?.discordId) {
+      const channel = await fetchNotifyChannel(client, db);
+      const guild = channel?.guild ?? null;
+      if (guild) {
+        await ensureRoleAdded({
+          guild,
+          userId: payload.discordId,
+          roleId: config.streamerLiveRoleId,
+          reason: "Streamer is live",
+        });
+      }
+    }
+
     // اگر session یکیه ولی پیام واقعاً وجود نداره -> دوباره بفرست
     if (prev?.sessionKey === sessionKey && prev?.messageId) {
       const exists = await notifyMessageExists(client, db, prev.messageId);
@@ -783,7 +824,7 @@ async function main() {
       delete active[streamerKey]; // پیام نیست، state رو پاک کن تا دوباره ارسال بشه
     }
 
-    // اگر session عوض شده و پیام قبلی داریم، حذفش کن
+    // اگر session عوض شده و پیام قبلی داریم، حذفش کن (role باید بماند چون هنوز live است)
     if (prev?.messageId && prev?.sessionKey !== sessionKey) {
       await deleteNotifyMessage(client, db, prev.messageId);
     }
@@ -795,14 +836,36 @@ async function main() {
     return true;
   }
 
-  async function ensureOfflineMessageDeleted(platformKey, streamerKey) {
+  async function ensureOfflineMessageDeleted(
+    platformKey,
+    streamerKey,
+    discordId
+  ) {
     const stateKey =
       platformKey === "kick" ? "kickActiveMessages" : "twitchActiveMessages";
     const active = db.state[stateKey] || (db.state[stateKey] = {});
     const prev = active[streamerKey];
     if (!prev?.messageId) return false;
 
-    await deleteNotifyMessage(client, db, prev.messageId); // اگر نشد هم مهم نیست
+    const deleted = await deleteNotifyMessage(client, db, prev.messageId);
+
+    // Only remove role AFTER the notify message is deleted (or already missing)
+    if (deleted && config.streamerLiveRoleId && discordId) {
+      const channel = await fetchNotifyChannel(client, db);
+      const guild = channel?.guild ?? null;
+      if (guild) {
+        await ensureRoleRemoved({
+          guild,
+          userId: discordId,
+          roleId: config.streamerLiveRoleId,
+          reason: "Streamer went offline",
+        });
+      }
+    }
+
+    // If deletion failed (permissions, etc.), keep state so we retry later and do NOT remove role yet
+    if (!deleted) return false;
+
     delete active[streamerKey];
     return true;
   }
@@ -854,7 +917,14 @@ async function main() {
           keyword.test(title);
 
         if (!shouldHaveMessage) {
-          const deleted = await ensureOfflineMessageDeleted("kick", slug);
+          const streamerMeta = metaMap.get(slug);
+          const discordId = streamerMeta?.discordId ?? null;
+
+          const deleted = await ensureOfflineMessageDeleted(
+            "kick",
+            slug,
+            discordId
+          );
           changed = changed || deleted;
           continue;
         }
@@ -880,10 +950,16 @@ async function main() {
         changed = changed || created;
       }
 
-      // If Kick API didn't return a slug we asked for, treat it as offline
       for (const askedSlug of group) {
         if (!processed.has(askedSlug)) {
-          const deleted = await ensureOfflineMessageDeleted("kick", askedSlug);
+          const streamerMeta = metaMap.get(askedSlug);
+          const discordId = streamerMeta?.discordId ?? null;
+
+          const deleted = await ensureOfflineMessageDeleted(
+            "kick",
+            askedSlug,
+            discordId
+          );
           changed = changed || deleted;
         }
       }
@@ -998,7 +1074,14 @@ async function main() {
 
         // Not live -> delete
         if (!st) {
-          const deleted = await ensureOfflineMessageDeleted("twitch", login);
+          const streamerMeta = metaMap.get(login);
+          const discordId = streamerMeta?.discordId ?? null;
+
+          const deleted = await ensureOfflineMessageDeleted(
+            "twitch",
+            login,
+            discordId
+          );
           changed = changed || deleted;
           continue;
         }
@@ -1009,7 +1092,14 @@ async function main() {
 
         // Live but keyword doesn't match -> delete
         if (!streamId || !keyword.test(title)) {
-          const deleted = await ensureOfflineMessageDeleted("twitch", login);
+          const streamerMeta = metaMap.get(login);
+          const discordId = streamerMeta?.discordId ?? null;
+
+          const deleted = await ensureOfflineMessageDeleted(
+            "twitch",
+            login,
+            discordId
+          );
           changed = changed || deleted;
           continue;
         }
@@ -1115,11 +1205,24 @@ async function main() {
 
     let changed = false;
     try {
-      const a = await checkKick();
-      const b = await checkTwitch();
-      const c = await discoverKick();
-      const d = await discoverTwitch();
-      changed = a || b || c || d;
+      const kickCycle = async () => {
+        const a = await checkKick();
+        const c = await discoverKick();
+        return a || c;
+      };
+
+      const twitchCycle = async () => {
+        const b = await checkTwitch();
+        const d = await discoverTwitch();
+        return b || d;
+      };
+
+      const [kickChanged, twitchChanged] = await Promise.all([
+        kickCycle(),
+        twitchCycle(),
+      ]);
+
+      changed = kickChanged || twitchChanged;
     } catch (err) {
       console.error("[Tick] Unexpected error:", err?.message ?? err);
     } finally {
@@ -1127,11 +1230,12 @@ async function main() {
 
       const now = Date.now();
       const shouldSaveMeta = now - lastMetaSaveAt > 5 * 60_000;
-      if (changed || healthDirty || shouldSaveMeta) {
+      if (changed || healthDirty || dbDirty || shouldSaveMeta) {
         await saveDb(db).catch(() => null);
         lastMetaSaveAt = now;
       }
       healthDirty = false;
+      dbDirty = false;
       tickRunning = false;
     }
 
@@ -1257,17 +1361,6 @@ async function main() {
     await sendEmbedsPaged(message, embeds);
   }
 
-  function parseOnOff(value) {
-    const v = String(value ?? "")
-      .trim()
-      .toLowerCase();
-    if (["1", "true", "yes", "y", "on", "enable", "enabled"].includes(v))
-      return true;
-    if (["0", "false", "no", "n", "off", "disable", "disabled"].includes(v))
-      return false;
-    return null;
-  }
-
   function extractChannelId(message, arg) {
     // Accept #channel mention, raw ID, or current channel keyword
     const v = String(arg ?? "").trim();
@@ -1279,21 +1372,6 @@ async function main() {
     if (/^\d{17,20}$/.test(v)) return v;
 
     return null;
-  }
-
-  function validateRegexPattern(pattern) {
-    const p = String(pattern ?? "").trim();
-    if (!p) return { ok: false, error: "Regex cannot be empty." };
-    if (p.length > 200)
-      return { ok: false, error: "Regex is too long (max 200 chars)." };
-    try {
-      // Validate compile (case-insensitive behavior matches runtime)
-      // eslint-disable-next-line no-new
-      new RegExp(p, "i");
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: `Invalid regex: ${err?.message ?? err}` };
-    }
   }
 
   function formatTs(ts) {
@@ -1309,7 +1387,13 @@ async function main() {
   }
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
-      const handled = await handleSetupInteraction(interaction);
+      const handled = await handleSetupInteraction(interaction, {
+        onSettingsSaved: async ({ intervalChanged, channelChanged }) => {
+          if (channelChanged) invalidateNotifyChannelCache();
+          if (intervalChanged) await restartIntervalIfRunning();
+        },
+      });
+
       if (!handled) return;
     } catch (err) {
       console.error("[Slash] Interaction error:", err?.message ?? err);

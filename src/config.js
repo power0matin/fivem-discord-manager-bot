@@ -37,6 +37,9 @@ const config = {
   notifyChannelId: required("DISCORD_NOTIFY_CHANNEL_ID"),
   prefix: optional("PREFIX", "."),
 
+  // Optional: role to grant to streamers while they are live (based on stored discordId)
+  streamerLiveRoleId: optional("STREAMER_LIVE_ROLE_ID"),
+
   mentionHere: bool("MENTION_HERE", true),
 
   keywordRegex: optional("KEYWORD_REGEX", "nox\\s*rp"),
