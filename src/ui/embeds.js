@@ -9,11 +9,16 @@ const { safeStr } = require("../validation");
  *
  * UX principles:
  * - Minimal but information-dense
- * - Consistent layout and hierarchy
- * - Context-aware footer (paging vs requester)
- * - Clean empty states
+ * - Clear hierarchy: title → meta → details
+ * - Lists rendered in fields (keeps mentions clickable)
+ * - Paging footer stays minimal (Page x/y)
  * - Safe truncation within Discord limits
  * - Works with Message or Interaction contexts
+ *
+ * Visual polish (non-dry):
+ * - subtle "meta chips" line
+ * - quote-style headers
+ * - footer icon (requester/guild) for a premium feel
  */
 
 /* ------------------------------- limits ------------------------------- */
@@ -39,7 +44,7 @@ const COLORS = Object.freeze({
   TWITCH: 0x9146ff,
 });
 
-// Keep icons subtle: only in title
+// Keep icons subtle: only in title / small meta chips
 const ICONS = Object.freeze({
   INFO: "ℹ️",
   SUCCESS: "✅",
@@ -56,7 +61,6 @@ function isMessageLike(ctx) {
 }
 
 function isInteractionLike(ctx) {
-  // Best-effort: chat input + component interactions
   return Boolean(ctx && typeof ctx.isRepliable === "function");
 }
 
@@ -117,29 +121,36 @@ function resolveContextMeta(ctx) {
   const botName = client?.user?.username || "Stream Notifier";
   const botIcon = client?.user?.displayAvatarURL?.() || undefined;
 
-  // requester label
   const requesterTag =
     ctx?.author?.tag ||
     ctx?.user?.tag ||
     (ctx?.user?.username ? `${ctx.user.username}` : "") ||
     "unknown";
 
-  // guild
   const guildNameRaw = ctx?.guild?.name ? String(ctx.guild.name) : "";
+
+  const requesterAvatar =
+    ctx?.author?.displayAvatarURL?.() ||
+    ctx?.user?.displayAvatarURL?.() ||
+    undefined;
+
+  const guildIcon = ctx?.guild?.iconURL?.() || undefined;
 
   return {
     botName,
     botIcon,
     requesterTag: safeStr(requesterTag),
     guildNameRaw: safeStr(guildNameRaw),
+    requesterAvatar,
+    guildIcon,
   };
 }
 
 /**
  * Footer modes:
  * - "requester": Requested by X • Guild • Extra
- * - "page": Page x/y • Extra  (minimal for paged lists/exports)
- * - "none": no footer text (rare)
+ * - "page": Page x/y • Extra
+ * - "none": no footer text
  */
 function buildFooterText(ctx, { mode = "requester", extra = "" } = {}) {
   const { requesterTag, guildNameRaw } = resolveContextMeta(ctx);
@@ -147,26 +158,48 @@ function buildFooterText(ctx, { mode = "requester", extra = "" } = {}) {
   const extraSafe = safeStr(extra);
   if (mode === "none") return "";
 
-  if (mode === "page") {
-    // For paged embeds, keep it minimal
-    return truncate(extraSafe, LIMITS.FOOTER);
-  }
+  if (mode === "page") return truncate(extraSafe, LIMITS.FOOTER);
 
-  // requester mode
   const parts = [];
-
-  // Avoid "powermatin • powermatin" duplication
   const guild = guildNameRaw;
   const same =
-    requesterTag &&
-    guild &&
-    requesterTag.toLowerCase() === guild.toLowerCase();
+    requesterTag && guild && requesterTag.toLowerCase() === guild.toLowerCase();
 
   parts.push(`Requested by ${requesterTag}`);
   if (guild && !same) parts.push(guild);
   if (extraSafe) parts.push(extraSafe);
 
   return truncate(parts.join(" • "), LIMITS.FOOTER);
+}
+
+/**
+ * Visual polish:
+ * - a subtle "meta chips" line (bold labels, separated by •)
+ * - example: **Total:** 3 • **Page:** 1/2 • **Showing:** 18
+ */
+function buildMetaLine(pairs) {
+  const clean = (pairs || [])
+    .filter(Boolean)
+    .map((p) => {
+      const k = safeStr(p.key);
+      const v = safeStr(p.value);
+      if (!k || !v) return null;
+      return `**${k}:** ${v}`;
+    })
+    .filter(Boolean);
+
+  if (!clean.length) return "";
+  return clean.join(" • ");
+}
+
+/**
+ * Quote-style header (softer than plain lines)
+ */
+function quoteLines(lines) {
+  const clean = (lines || []).map((x) => safeStr(x)).filter(Boolean);
+  if (!clean.length) return "";
+  // Use blockquote styling for a clean "card header" feel
+  return clean.map((l) => `> ${l}`).join("\n");
 }
 
 /**
@@ -185,6 +218,54 @@ function normalizeFields(fields) {
     }));
 }
 
+/**
+ * Split lines into chunks that fit within Discord field value limit.
+ * Prevents ugly truncation and keeps mentions clickable (no code blocks).
+ */
+function splitLinesToFieldValues(lines, maxChars = LIMITS.FIELD_VALUE) {
+  const clean = (lines || []).map((x) => safeStr(x)).filter(Boolean);
+  const chunks = [];
+  let buf = [];
+  let len = 0;
+
+  for (const line of clean) {
+    const addLen = (buf.length ? 1 : 0) + line.length; // +1 for '\n'
+    if (len + addLen > maxChars) {
+      if (buf.length) chunks.push(buf.join("\n"));
+      buf = [line];
+      len = line.length;
+      continue;
+    }
+    buf.push(line);
+    len += addLen;
+  }
+
+  if (buf.length) chunks.push(buf.join("\n"));
+  return chunks.length ? chunks : ["—"];
+}
+
+function looksShortLines(lines) {
+  if (!Array.isArray(lines) || lines.length === 0) return false;
+  const sample = lines.slice(0, Math.min(30, lines.length));
+  const avg = sample.reduce((a, s) => a + safeStr(s).length, 0) / sample.length;
+  return avg <= 32;
+}
+
+function pickFooterIconURL(ctx, footerMode, chrome) {
+  const meta = resolveContextMeta(ctx);
+  const useChrome = String(chrome || "standard").toLowerCase() !== "minimal";
+  if (!useChrome) return undefined;
+
+  // Page footers: prefer guild icon (feels "server branded")
+  if (footerMode === "page") return meta.guildIcon || meta.botIcon;
+
+  // Requester footers: show requester avatar (more personal/premium)
+  if (footerMode === "requester")
+    return meta.requesterAvatar || meta.guildIcon || meta.botIcon;
+
+  return meta.botIcon;
+}
+
 /* ------------------------------ core API ------------------------------ */
 
 /**
@@ -194,10 +275,10 @@ function normalizeFields(fields) {
  * - supports { footerText, extraFooter } (old style)
  * - supports { footer: { text } } (legacy one-off callers)
  *
- * New options:
+ * Options:
  * - density: "compact" | "normal" | "verbose"
  * - footerMode: "requester" | "page" | "none"
- * - chrome: "standard" | "minimal" (author/timestamp)
+ * - chrome: "standard" | "minimal"
  */
 function makeEmbed(
   ctx,
@@ -208,17 +289,14 @@ function makeEmbed(
     fields,
     url,
 
-    // footer (legacy + modern)
     extraFooter,
     footerText,
     footer, // { text }
     footerMode = "requester",
 
-    // visuals
     thumbnailUrl,
     imageUrl,
 
-    // layout knobs
     density = "normal",
     chrome = "standard",
     timestamp = true,
@@ -231,16 +309,14 @@ function makeEmbed(
 
   const useChrome = String(chrome || "standard").toLowerCase() !== "minimal";
 
-  // Consistent header (optional)
+  // Consistent header
   if (useChrome) {
     e.setAuthor({ name: meta.botName, iconURL: meta.botIcon });
   }
 
-  // Thumbnail only when explicitly provided (keeps it clean)
   if (thumbnailUrl) e.setThumbnail(String(thumbnailUrl));
   if (imageUrl) e.setImage(String(imageUrl));
 
-  // Title: icon + text
   if (title) {
     const icon = toneToIcon(tone);
     e.setTitle(truncate(`${icon} ${safeStr(title)}`, LIMITS.TITLE));
@@ -248,35 +324,28 @@ function makeEmbed(
 
   if (url) e.setURL(String(url));
 
-  // Density rules (minimal but complete)
   const dens = String(density || "normal").toLowerCase();
   let desc = safeStr(description);
 
-  if (dens === "compact") {
-    // Compact: trim aggressively but keep meaning
-    desc = truncate(desc, Math.min(LIMITS.DESC, 900));
-  } else if (dens === "verbose") {
-    // Verbose: allow full desc (still within Discord limit)
-    desc = truncate(desc, LIMITS.DESC);
-  } else {
-    // Normal
-    desc = truncate(desc, LIMITS.DESC);
-  }
+  if (dens === "compact") desc = truncate(desc, Math.min(LIMITS.DESC, 900));
+  else desc = truncate(desc, LIMITS.DESC);
 
   if (desc) e.setDescription(desc);
 
   const normFields = normalizeFields(fields);
   if (normFields.length) e.addFields(normFields);
 
-  // Footer text resolution order:
-  // 1) footerText explicit
-  // 2) footer?.text legacy
-  // 3) buildFooterText(ctx, mode, extraFooter)
   const explicitFooter =
-    footerText || footer?.text || buildFooterText(ctx, { mode: footerMode, extra: extraFooter });
+    footerText ||
+    footer?.text ||
+    buildFooterText(ctx, { mode: footerMode, extra: extraFooter });
 
   if (explicitFooter) {
-    e.setFooter({ text: truncate(String(explicitFooter), LIMITS.FOOTER) });
+    const iconURL = pickFooterIconURL(ctx, footerMode, chrome);
+    e.setFooter({
+      text: truncate(String(explicitFooter), LIMITS.FOOTER),
+      ...(iconURL ? { iconURL } : {}),
+    });
   }
 
   if (useChrome && timestamp) e.setTimestamp(new Date());
@@ -286,11 +355,6 @@ function makeEmbed(
 
 /* ---------------------------- send helpers ---------------------------- */
 
-/**
- * replyEmbed(ctx, embed, opts)
- * - Works with Message (reply) and Interaction (reply/followUp)
- * - Keeps allowedMentions safe by default
- */
 async function replyEmbed(ctx, embed, opts = {}) {
   const payload = {
     embeds: [embed],
@@ -298,12 +362,10 @@ async function replyEmbed(ctx, embed, opts = {}) {
     ...opts,
   };
 
-  // Message path
   if (isMessageLike(ctx)) {
     return ctx.reply(payload).catch(() => null);
   }
 
-  // Interaction path
   if (isInteractionLike(ctx)) {
     try {
       if (ctx.deferred || ctx.replied) return await ctx.followUp(payload);
@@ -327,10 +389,6 @@ async function sendEmbed(message, embed, opts = {}) {
     .catch(() => null);
 }
 
-/**
- * For paging: reply first, then send the rest into the channel.
- * (Keeps current behavior; if you later want Button-based paging, we can add it as a separate module.)
- */
 async function sendEmbedsPaged(message, embeds) {
   if (!Array.isArray(embeds) || embeds.length === 0) return;
   await replyEmbed(message, embeds[0]);
@@ -342,26 +400,13 @@ async function sendEmbedsPaged(message, embeds) {
 
 /* --------------------------- builder helpers -------------------------- */
 
-function looksShortLines(lines) {
-  // Heuristic: good for 2-col layout
-  // If most lines are short, 2 columns improves scanability.
-  if (!Array.isArray(lines) || lines.length === 0) return false;
-  const sample = lines.slice(0, Math.min(30, lines.length));
-  const avg = sample.reduce((a, s) => a + safeStr(s).length, 0) / sample.length;
-  return avg <= 32;
-}
-
 /**
- * buildListEmbeds(message, options)
+ * buildListEmbeds(ctx, options)
  *
- * options:
- * - layout: "auto" | "single" | "two-column"
- * - perPage: number (for single layout)
- * - perCol: number (for two-column layout)
- *
- * Notes:
- * - Mentions remain clickable (no code blocks)
- * - Footer uses "page" mode for minimal paging UI
+ * Visual polish:
+ * - header shown as quote block
+ * - meta chips line: Total/Page/Showing (clean + modern)
+ * - list stays in fields (mentions clickable)
  */
 function buildListEmbeds(
   ctx,
@@ -370,65 +415,62 @@ function buildListEmbeds(
     title = "List",
     headerLines = [],
     lines = [],
-    // layout
     layout = "auto",
     perPage = 18,
     perCol = 10,
-    // empty state
     emptyTitle,
     emptyHint,
   } = {}
 ) {
   const cleanLines = (lines || []).map((x) => safeStr(x)).filter(Boolean);
 
-  const header = (headerLines || []).map((x) => safeStr(x)).filter(Boolean).join("\n");
+  const headerBlock = quoteLines(headerLines);
 
-  // Empty state (clean + actionable)
   if (cleanLines.length === 0) {
-    const descParts = [];
-    if (header) descParts.push(header);
-    descParts.push(emptyHint ? safeStr(emptyHint) : "No items to display.");
+    const hint = emptyHint ? safeStr(emptyHint) : "No items to display.";
+    const desc = [headerBlock, hint].filter(Boolean).join("\n\n");
+
     return [
       makeEmbed(ctx, {
         tone,
         title: emptyTitle || title,
-        description: descParts.join("\n\n"),
-        density: "normal",
+        description: desc,
         footerMode: "requester",
+        density: "normal",
       }),
     ];
   }
 
-  // Decide layout
   const mode = String(layout || "auto").toLowerCase();
   const useTwoCol =
     mode === "two-column" ||
-    (mode === "auto" && cleanLines.length > 12 && looksShortLines(cleanLines));
+    (mode === "auto" && cleanLines.length >= 12 && looksShortLines(cleanLines));
 
-  // Two-column layout using inline fields
   if (useTwoCol) {
-    const cols = chunkArray(cleanLines, perCol * 2); // each page holds 2 columns
-    const totalPages = Math.max(1, cols.length);
+    const pageBlocks = chunkArray(cleanLines, perCol * 2);
+    const totalPages = Math.max(1, pageBlocks.length);
 
-    return cols.map((pageLines, idx) => {
+    return pageBlocks.map((pageLines, idx) => {
       const left = pageLines.slice(0, perCol);
       const right = pageLines.slice(perCol, perCol * 2);
 
+      const leftVal =
+        splitLinesToFieldValues(left, LIMITS.FIELD_VALUE)[0] || "—";
+      const rightVal =
+        splitLinesToFieldValues(right, LIMITS.FIELD_VALUE)[0] || "—";
+
       const fields = [
-        {
-          name: " ",
-          value: left.length ? left.join("\n") : "—",
-          inline: true,
-        },
-        {
-          name: " ",
-          value: right.length ? right.join("\n") : "—",
-          inline: true,
-        },
+        { name: "\u200b", value: leftVal, inline: true },
+        { name: "\u200b", value: rightVal, inline: true },
       ];
 
-      // Keep description minimal: header + count only
-      const desc = header ? `${header}\n\nTotal: **${cleanLines.length}**` : `Total: **${cleanLines.length}**`;
+      const metaLine = buildMetaLine([
+        { key: "Total", value: String(cleanLines.length) },
+        { key: "Page", value: `${idx + 1}/${totalPages}` },
+        { key: "Showing", value: String(pageLines.length) },
+      ]);
+
+      const desc = [headerBlock, metaLine].filter(Boolean).join("\n\n");
 
       return makeEmbed(ctx, {
         tone,
@@ -437,38 +479,57 @@ function buildListEmbeds(
         fields,
         footerMode: "page",
         extraFooter: `Page ${idx + 1}/${totalPages}`,
+        density: "normal",
       });
     });
   }
 
-  // Single-column layout (classic)
+  // Single-column
   const chunks = chunkArray(cleanLines, perPage);
   const totalPages = Math.max(1, chunks.length);
 
   return chunks.map((group, idx) => {
-    const body = group.join("\n");
-    const desc = header ? `${header}\n\n${body}` : body;
+    const fieldValues = splitLinesToFieldValues(group, LIMITS.FIELD_VALUE);
+
+    // Usually a single field is enough; if it grows, we split to multiple fields
+    const listFields = fieldValues.slice(0, LIMITS.FIELDS_MAX).map((v) => ({
+      name: "\u200b",
+      value: v,
+      inline: false,
+    }));
+
+    const metaLine = buildMetaLine([
+      { key: "Total", value: String(cleanLines.length) },
+      { key: "Page", value: `${idx + 1}/${totalPages}` },
+      { key: "Showing", value: String(group.length) },
+    ]);
+
+    const desc = [headerBlock, metaLine].filter(Boolean).join("\n\n");
 
     return makeEmbed(ctx, {
       tone,
-      title: `${safeStr(title)} (${cleanLines.length})`,
+      title: safeStr(title),
       description: desc,
+      fields: listFields,
       footerMode: "page",
       extraFooter: `Page ${idx + 1}/${totalPages}`,
+      density: "normal",
     });
   });
 }
 
 /**
  * buildCodeEmbeds(ctx, options)
- * - Uses code blocks in description
- * - Footer uses "page" mode
+ * - code blocks in description
+ * - meta chips line at top (subtle)
+ * - chrome minimal (focus on content)
  */
-function buildCodeEmbeds(ctx, { tone = "INFO", title = "Export", lang = "json", text = "" } = {}) {
+function buildCodeEmbeds(
+  ctx,
+  { tone = "INFO", title = "Export", lang = "json", text = "" } = {}
+) {
   const prefix = `\`\`\`${lang}\n`;
   const suffix = "\n```";
-
-  // ensure we don't exceed description limit
   const budget = Math.max(800, LIMITS.DESC - prefix.length - suffix.length);
 
   const s = safeStr(text);
@@ -477,38 +538,67 @@ function buildCodeEmbeds(ctx, { tone = "INFO", title = "Export", lang = "json", 
 
   const totalPages = Math.max(1, parts.length);
 
-  return parts.map((p, idx) =>
-    makeEmbed(ctx, {
+  return parts.map((p, idx) => {
+    const metaLine = buildMetaLine([
+      { key: "Page", value: `${idx + 1}/${totalPages}` },
+      { key: "Lang", value: lang },
+    ]);
+
+    const desc = [metaLine, `${prefix}${p}${suffix}`]
+      .filter(Boolean)
+      .join("\n\n");
+
+    return makeEmbed(ctx, {
       tone,
       title: safeStr(title),
-      description: `${prefix}${p}${suffix}`,
+      description: desc,
       footerMode: "page",
       extraFooter: `Page ${idx + 1}/${totalPages}`,
+      chrome: "minimal",
+      timestamp: false,
       density: "normal",
-    })
-  );
+    });
+  });
 }
 
 /* ------------------------- quick UI shortcuts ------------------------- */
 
 const ui = {
   info: (ctx, title, description, fields) =>
-    replyEmbed(ctx, makeEmbed(ctx, { tone: "INFO", title, description, fields })),
+    replyEmbed(
+      ctx,
+      makeEmbed(ctx, { tone: "INFO", title, description, fields })
+    ),
 
   success: (ctx, title, description, fields) =>
-    replyEmbed(ctx, makeEmbed(ctx, { tone: "SUCCESS", title, description, fields })),
+    replyEmbed(
+      ctx,
+      makeEmbed(ctx, { tone: "SUCCESS", title, description, fields })
+    ),
 
   warn: (ctx, title, description, fields) =>
-    replyEmbed(ctx, makeEmbed(ctx, { tone: "WARN", title, description, fields })),
+    replyEmbed(
+      ctx,
+      makeEmbed(ctx, { tone: "WARN", title, description, fields })
+    ),
 
   error: (ctx, title, description, fields) =>
-    replyEmbed(ctx, makeEmbed(ctx, { tone: "ERROR", title, description, fields })),
+    replyEmbed(
+      ctx,
+      makeEmbed(ctx, { tone: "ERROR", title, description, fields })
+    ),
 
   kick: (ctx, title, description, fields) =>
-    replyEmbed(ctx, makeEmbed(ctx, { tone: "KICK", title, description, fields })),
+    replyEmbed(
+      ctx,
+      makeEmbed(ctx, { tone: "KICK", title, description, fields })
+    ),
 
   twitch: (ctx, title, description, fields) =>
-    replyEmbed(ctx, makeEmbed(ctx, { tone: "TWITCH", title, description, fields })),
+    replyEmbed(
+      ctx,
+      makeEmbed(ctx, { tone: "TWITCH", title, description, fields })
+    ),
 };
 
 module.exports = {
