@@ -1229,15 +1229,13 @@ async function main() {
     const cmdLower = normalizeName(cmd);
 
     if (cmdLower === "help") {
-      const requestedBy = message?.author?.tag || "unknown";
-
       const e = makeEmbed(message, {
         tone: "INFO",
-        title: "Stream Notifier Bot • Commands",
+        title: "FiveM Discord Manager Bot • Commands",
         description: [
           `**Prefix:** \`${config.prefix}\``,
           `Use \`${config.prefix}help\` anytime.`,
-          `Tip: You can also use **/setup** for guided configuration.`,
+          `Tip: Use **/setup** (Stream Notifier) and module commands: **/welcome**, **/tickets**, **/fivem**.`,
         ].join("\n"),
         fields: [
           {
@@ -1249,8 +1247,9 @@ async function main() {
               `\`${prefix}tick\`  (manual scan)`,
             ].join("\n"),
           },
+
           {
-            name: "Settings (admin)",
+            name: "Stream Notifier • Settings (admin)",
             value: [
               `\`${prefix}set channel <#channel|channelId|this>\``,
               `\`${prefix}set mentionhere <on|off>\``,
@@ -1264,11 +1263,13 @@ async function main() {
               `\`${prefix}refresh kickCategory\``,
             ].join("\n"),
           },
+
           {
-            name: "Kick",
+            name: "Stream Notifier • Kick (admin)",
             value: [
               `\`${prefix}k list\``,
-              `\`${prefix}k add <kickSlug> [@discordUser]\``,
+              `\`${prefix}k add <kickSlug> [@discordUser|discordUserId]\``,
+              `\`${prefix}k <kickSlug> [@discordUser|discordUserId]\`  (shortcut)`,
               `\`${prefix}k addmany <slug1> <slug2> ...\``,
               `\`${prefix}k setmention <kickSlug> <@user|id|none>\``,
               `\`${prefix}k remove <kickSlug>\``,
@@ -1277,11 +1278,13 @@ async function main() {
             ].join("\n"),
             inline: true,
           },
+
           {
-            name: "Twitch",
+            name: "Stream Notifier • Twitch (admin)",
             value: [
               `\`${prefix}t list\``,
-              `\`${prefix}t add <twitchLogin> [@discordUser]\``,
+              `\`${prefix}t add <twitchLogin> [@discordUser|discordUserId]\``,
+              `\`${prefix}t <twitchLogin> [@discordUser|discordUserId]\`  (shortcut)`,
               `\`${prefix}t addmany <login1> <login2> ...\``,
               `\`${prefix}t setmention <twitchLogin> <@user|id|none>\``,
               `\`${prefix}t remove <twitchLogin>\``,
@@ -1289,6 +1292,49 @@ async function main() {
               `\`${prefix}t status <twitchLogin>\``,
             ].join("\n"),
             inline: true,
+          },
+
+          {
+            name: "Welcome • Slash (admin)",
+            value: [
+              "`/welcome toggle enabled:true|false`",
+              "`/welcome set-channel channel:#channel`",
+              '`/welcome set-title title:"..."`',
+              '`/welcome set-message template:"..."`  (use {user}, {server})',
+              '`/welcome set-buttons label1:"..." url1:"..." label2:"..." url2:"..."`',
+              '`/welcome set-color color:"#RRGGBB" clear:true|false`',
+              '`/welcome set-dm enabled:true|false template:"..."`',
+              "`/welcome set-role role:@Role clear:true|false`",
+              "`/welcome test`",
+              "`/welcome show`",
+            ].join("\n"),
+          },
+
+          {
+            name: "Tickets • Slash (admin)",
+            value: [
+              "`/tickets toggle enabled:true|false`",
+              "`/tickets set-panel channel:#channel`",
+              "`/tickets post-panel`",
+              "`/tickets set-category category:#category`",
+              "`/tickets set-support-role role:@Role clear:true|false`",
+              "`/tickets set-log channel:#channel clear:true|false`",
+              '`/tickets set-name template:"ticket-{user}"`',
+              "`/tickets close`  (inside ticket channel)`",
+              "`/tickets show`",
+            ].join("\n"),
+          },
+
+          {
+            name: "FiveM Status • Slash (admin)",
+            value: [
+              "`/fivem toggle enabled:true|false`",
+              "`/fivem set-channel channel:#channel`",
+              '`/fivem set-endpoint url:"http(s)://..."`',
+              "`/fivem set-interval seconds:30..3600`",
+              "`/fivem test`",
+              "`/fivem show`",
+            ].join("\n"),
           },
         ],
         extraFooter: "Help",
