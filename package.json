@@ -6,7 +6,10 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "slash:register": "node src/modules/stream-notifier/slash/register.js",
+    "slash:list": "node src/modules/stream-notifier/slash/list-commands.js",
+    "slash:purge": "node src/modules/stream-notifier/slash/purge-commands.js"
   },
   "engines": {
     "node": ">=18"
