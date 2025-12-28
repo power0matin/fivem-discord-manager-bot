@@ -21,18 +21,50 @@ const DEFAULT_DB = {
     kickGtaCategoryResolvedAt: 0,
   },
 
-  // ---- NEW MODULES (backward-compatible) ----
+  // ---- (backward-compatible) ----
   fivem: {
     settings: {
       enabled: false,
-      baseUrl: null, // e.g. http://127.0.0.1:30120
-      statusChannelId: null,
+
+      // Internal API endpoint for FiveM json endpoints (info.json/dynamic.json/players.json)
+      baseUrl: "http://178.22.124.71:30120", // e.g. http://127.0.0.1:30120
+
+      // Where to post/edit the single status message
+      statusChannelId: 1426288178427461642,
       statusMessageId: null, // edited in-place to avoid spam
-      checkIntervalSeconds: 60,
+
+      // Polling (recommended: every 5 minutes)
+      checkIntervalSeconds: 300,
       timeoutMs: 5000,
-      showPlayers: false,
-      maxPlayersShown: 10,
+
+      // UI/UX (matches your screenshot-style card)
+      title: "Nox RP v3.1",
+      description:
+        "Welcome to Nox RP v3.1 — a next-generation FiveM roleplay experience. Build your story, connect with others, and enjoy a fully customized RP environment!",
+      bannerImageUrl:
+        "https://cdn.discordapp.com/attachments/1329051555688743043/1433115641900171365/AA1_copy.png?ex=6951f5b3&is=6950a433&hm=1d2edd9107d3229c6114ef62560e99d238a088da2b2d568b46d5a240aec88946&",
+
+      // NEW: manual embed color (hex string). Example: "#ff7300ff" or null for auto tone.
+      embedColor: "#ff8383",
+
+      // Connect UX
+      connectCommand: "connect sv.nox-rp.ir",
       connectLabel: "Connect",
+      // Can be http(s) (Link button) OR fivem:// (custom button + ephemeral instructions)
+      connectUrl: "fivem://connect/sv.nox-rp.ir",
+
+      // Website button
+      websiteLabel: "Website",
+      websiteUrl: "https://nox-rp.ir/",
+
+      // NEW: button emojis (optional)
+      websiteEmoji: "🌐",
+      connectEmoji: "🎮",
+
+      showPlayers: true,
+      maxPlayersShown: 10,
+
+      restartTimes: ["05:00"],
     },
     state: {
       consecutiveFailures: 0,
@@ -42,6 +74,9 @@ const DEFAULT_DB = {
       lastSuccessAt: 0,
       lastCheckedAt: 0,
       lastOnline: null,
+
+      // For uptime calc (only set on *observed* offline->online)
+      wentOnlineAt: 0,
     },
   },
 

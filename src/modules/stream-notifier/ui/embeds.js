@@ -110,6 +110,7 @@ function toneToColor(tone) {
 function parseColor(input) {
   if (input == null) return null;
 
+  // Numeric: 0xRRGGBB or decimal int
   if (typeof input === "number" && Number.isFinite(input)) {
     const n = Math.floor(input);
     if (n < 0 || n > 0xffffff) return null;
@@ -119,19 +120,31 @@ function parseColor(input) {
   const s = String(input).trim();
   if (!s) return null;
 
-  // Accept: "#RRGGBB", "RRGGBB", "0xRRGGBB"
-  const cleaned = s.replace(/^#/g, "").replace(/^0x/i, "").trim();
+  // Accept:
+  // - "#RRGGBB", "RRGGBB", "0xRRGGBB"
+  // - "#RRGGBBAA", "RRGGBBAA", "0xRRGGBBAA"  (alpha ignored)
+  let cleaned = s.replace(/^#/g, "").replace(/^0x/i, "").trim();
 
-  if (!/^[0-9a-fA-F]{6}$/.test(cleaned)) return null;
+  if (!/^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(cleaned)) return null;
+
+  // Discord embeds do not support alpha; if provided, ignore last 2 bytes.
+  if (cleaned.length === 8) cleaned = cleaned.slice(0, 6);
 
   const n = Number.parseInt(cleaned, 16);
   if (!Number.isFinite(n)) return null;
+  if (n < 0 || n > 0xffffff) return null;
+
   return n;
 }
 
 function toneToIcon(tone) {
   const t = String(tone || "INFO").toUpperCase();
   return ICONS[t] || ICONS.INFO;
+}
+function resolveEmbedColor(tone, colorOverride) {
+  const override = parseColor(colorOverride);
+  if (override != null) return override;
+  return toneToColor(tone);
 }
 
 /**
@@ -342,8 +355,7 @@ function makeEmbed(
 
   const e = new EmbedBuilder();
 
-  const colorOverride = parseColor(color);
-  e.setColor(colorOverride != null ? colorOverride : toneToColor(tone));
+  e.setColor(resolveEmbedColor(tone, color));
 
   const useChrome = String(chrome || "standard").toLowerCase() !== "minimal";
 
