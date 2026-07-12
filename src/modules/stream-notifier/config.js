@@ -34,7 +34,9 @@ const allowedRoleIds = String(process.env.ALLOWED_ROLE_IDS || "")
 
 const config = {
   discordToken: required("DISCORD_TOKEN"),
-  notifyChannelId: required("DISCORD_NOTIFY_CHANNEL_ID"),
+  clientId: optional("DISCORD_CLIENT_ID"),
+  guildId: optional("DISCORD_GUILD_ID"),
+  notifyChannelId: optional("DISCORD_NOTIFY_CHANNEL_ID"),
   prefix: optional("PREFIX", "."),
 
   // Optional: role to grant to streamers while they are live (based on stored discordId)

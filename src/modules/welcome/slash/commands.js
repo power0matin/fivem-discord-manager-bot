@@ -90,6 +90,23 @@ const welcome = new SlashCommandBuilder()
   )
   .addSubcommand((sc) =>
     sc
+      .setName("set-banner")
+      .setDescription("Set/clear welcome embed banner image.")
+      .addStringOption((o) =>
+        o
+          .setName("url")
+          .setDescription("http(s) image URL for banner")
+          .setRequired(false)
+      )
+      .addBooleanOption((o) =>
+        o
+          .setName("clear")
+          .setDescription("true to clear banner image")
+          .setRequired(false)
+      )
+  )
+  .addSubcommand((sc) =>
+    sc
       .setName("set-dm")
       .setDescription("Enable/disable welcome DM and set template.")
       .addBooleanOption((o) =>

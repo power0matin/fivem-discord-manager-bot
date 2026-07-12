@@ -140,6 +140,7 @@ function buildWelcomeEmbed(ctx, member) {
     title,
     description,
     thumbnailUrl: avatarUrl || undefined,
+    imageUrl: s.bannerImageUrl || undefined,
 
     // Remove ✅ next to title for Welcome
     titleIcon: false,
@@ -399,6 +400,46 @@ async function handleInteraction(interaction, ctx) {
     return true;
   }
 
+  if (sub === "set-banner") {
+    const clear = interaction.options.getBoolean("clear", false) || false;
+    const url = interaction.options.getString("url", false);
+
+    if (clear) {
+      s.bannerImageUrl = null;
+      await ctx.persistDb().catch(() => null);
+      await safeReply(interaction, {
+        ephemeral: true,
+        content: "✅ Welcome banner image cleared.",
+      });
+      return true;
+    }
+
+    if (!url) {
+      await safeReply(interaction, {
+        ephemeral: true,
+        content: "❌ Provide an image URL or set clear=true.",
+      });
+      return true;
+    }
+
+    const raw = String(url).trim();
+    if (!/^https?:\/\/\S+$/i.test(raw)) {
+      await safeReply(interaction, {
+        ephemeral: true,
+        content: "❌ Invalid URL. Must be http(s).",
+      });
+      return true;
+    }
+
+    s.bannerImageUrl = raw;
+    await ctx.persistDb().catch(() => null);
+    await safeReply(interaction, {
+      ephemeral: true,
+      content: "✅ Welcome banner image updated.",
+    });
+    return true;
+  }
+
   if (sub === "set-dm") {
     const enabled = interaction.options.getBoolean("enabled", true);
     const tpl = interaction.options.getString("template", false);
@@ -455,9 +496,6 @@ async function handleInteraction(interaction, ctx) {
       });
       return true;
     }
-
-    const db = ctx.getDb();
-    const s = db.welcome?.settings;
 
     await safeReply(interaction, {
       ephemeral: true,
@@ -529,6 +567,13 @@ async function handleInteraction(interaction, ctx) {
             ? `\`${String(s.embedDescriptionTemplate).slice(0, 200)}\``
             : "_Not set_",
           inline: false,
+        },
+        {
+          name: "Banner",
+          value: s.bannerImageUrl
+            ? `[set](${s.bannerImageUrl})`
+            : "_None_",
+          inline: true,
         },
         {
           name: "Buttons",

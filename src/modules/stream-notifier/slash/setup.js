@@ -712,7 +712,7 @@ async function handleChatInput(interaction) {
   if (sub === "test") return testNotify(interaction);
 }
 
-async function handleComponent(interaction) {
+async function handleComponent(interaction, opts = {}) {
   cleanupExpiredSessions();
 
   const id = interaction.customId || "";

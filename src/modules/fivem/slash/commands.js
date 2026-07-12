@@ -151,6 +151,39 @@ const fivem = new SlashCommandBuilder()
       )
   )
 
+  // Voice status
+  .addSubcommand((sc) =>
+    sc
+      .setName("set-voice-status")
+      .setDescription("Set a voice channel to show server status in its name.")
+      .addChannelOption((o) =>
+        o
+          .setName("channel")
+          .setDescription("Voice channel for status display")
+          .addChannelTypes(ChannelType.GuildVoice)
+          .setRequired(false)
+      )
+      .addBooleanOption((o) =>
+        o
+          .setName("clear")
+          .setDescription("true to disable voice status")
+          .setRequired(false)
+      )
+  )
+
+  // Scheduled events
+  .addSubcommand((sc) =>
+    sc
+      .setName("set-scheduled-events")
+      .setDescription("Auto-create Discord events for server restarts.")
+      .addBooleanOption((o) =>
+        o
+          .setName("enabled")
+          .setDescription("Enable/disable scheduled events")
+          .setRequired(true)
+      )
+  )
+
   .addSubcommand((sc) =>
     sc
       .setName("status")

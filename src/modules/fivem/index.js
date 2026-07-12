@@ -6,10 +6,14 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  MessageFlags,
+  MessageFlagsBitField,
+  ChannelType,
+  GuildScheduledEventEntityType,
+  GuildScheduledEventPrivacyLevel,
+  GuildScheduledEventStatus,
 } = require("discord.js");
 
-const EPHEMERAL_FLAG = MessageFlags?.Ephemeral ?? 1 << 6;
+const EPHEMERAL_FLAG = MessageFlagsBitField?.Flags?.Ephemeral ?? 1 << 6;
 
 function normalizeBaseUrl(input) {
   const raw = String(input || "").trim();
@@ -757,6 +761,8 @@ async function doPoll(ctx, opts = {}) {
   // Only update the channel message if requested + enabled
   if (updateMessage && s.enabled) {
     message = await ensureStatusMessage(ctx, embed);
+    // Also update voice channel status on each poll
+    await updateVoiceChannelStatus(ctx).catch(() => null);
   }
 
   return { ok: true, status, message };
@@ -986,6 +992,18 @@ async function handleInteraction(interaction, ctx) {
           value: String(Boolean(s.showPlayers)),
           inline: true,
         },
+        {
+          name: "Voice Status",
+          value: s.voiceStatusChannelId
+            ? `<#${s.voiceStatusChannelId}>`
+            : "_None_",
+          inline: true,
+        },
+        {
+          name: "Scheduled Events",
+          value: String(Boolean(s.enableScheduledEvents)),
+          inline: true,
+        },
       ],
     });
 
@@ -1126,6 +1144,48 @@ async function handleInteraction(interaction, ctx) {
     return true;
   }
 
+  if (sub === "set-voice-status") {
+    const clear = interaction.options.getBoolean("clear", false) || false;
+    const ch = interaction.options.getChannel("channel", false);
+
+    if (clear) {
+      s.voiceStatusChannelId = null;
+      await ctx.persistDb().catch(() => null);
+      await safeReply(interaction, {
+        ephemeral: true,
+        content: "✅ Voice status channel disabled.",
+      });
+      return true;
+    }
+
+    if (!ch) {
+      await safeReply(interaction, {
+        ephemeral: true,
+        content: "❌ Provide a voice channel or set clear=true.",
+      });
+      return true;
+    }
+
+    s.voiceStatusChannelId = ch.id;
+    await ctx.persistDb().catch(() => null);
+    await safeReply(interaction, {
+      ephemeral: true,
+      content: `✅ Voice status channel set to <#${ch.id}>.`,
+    });
+    return true;
+  }
+
+  if (sub === "set-scheduled-events") {
+    const enabled = interaction.options.getBoolean("enabled", true);
+    s.enableScheduledEvents = Boolean(enabled);
+    await ctx.persistDb().catch(() => null);
+    await safeReply(interaction, {
+      ephemeral: true,
+      content: `✅ Scheduled events are now: **${fmtBool(s.enableScheduledEvents)}**.`,
+    });
+    return true;
+  }
+
   if (sub === "status") {
     await safeReply(interaction, {
       ephemeral: true,
@@ -1159,12 +1219,106 @@ async function handleInteraction(interaction, ctx) {
       });
     }
 
+    // Also update voice channel status
+    await updateVoiceChannelStatus(ctx).catch(() => null);
+
     const embed = buildStatusEmbed(ctx, res.status);
     await safeReply(interaction, { ephemeral: true, embeds: [embed] });
     return true;
   }
 
   return true;
+}
+
+async function updateVoiceChannelStatus(ctx) {
+  try {
+    const db = ctx.getDb();
+    const s = db.fivem?.settings || {};
+    const st = db.fivem?.state || {};
+
+    // Only update if voiceStatusChannelId is configured
+    if (!s.voiceStatusChannelId) return;
+
+    const channel = await ctx.client.channels
+      .fetch(s.voiceStatusChannelId)
+      .catch(() => null);
+
+    if (!channel) return;
+
+    // Only works on GuildVoice channels
+    if (channel.type !== ChannelType.GuildVoice) return;
+
+    const status = st.lastOnline;
+    const dynamic = {};
+    // Try to get player count from last poll if available
+    let statusText;
+    if (status === true) {
+      statusText = "🟢 Server Online";
+    } else {
+      statusText = "🔴 Server Offline";
+    }
+
+    await channel.setName(statusText).catch(() => null);
+  } catch (_) {}
+}
+
+async function createRestartEvent(ctx) {
+  try {
+    const db = ctx.getDb();
+    const s = db.fivem?.settings || {};
+    const st = db.fivem?.state || {};
+
+    if (!s.enableScheduledEvents) return;
+    if (!s.restartTimes || !s.restartTimes.length) return;
+
+    const now = Date.now();
+    const nextRestartMs = computeNextRestartMs(now, s.restartTimes);
+    if (!nextRestartMs) return;
+
+    // Don't create if restart is more than 2 hours away
+    const diff = nextRestartMs - now;
+    if (diff > 2 * 60 * 60 * 1000) return;
+
+    // Don't create if restart already happened recently (within 30 min)
+    if (st.lastRestartEventAt && now - st.lastRestartEventAt < 30 * 60 * 1000) {
+      return;
+    }
+
+    // Check if there's already an upcoming event
+    const guild = await ctx.client.guilds.fetch(s.statusGuildId || s.statusChannelId).catch(() => null);
+    if (!guild) return;
+
+    const events = await guild.scheduledEvents.fetch().catch(() => null);
+    if (events) {
+      const upcoming = events.find(
+        (e) =>
+          e.status === GuildScheduledEventStatus.Scheduled &&
+          e.name?.includes("Restart")
+      );
+      if (upcoming) return;
+    }
+
+    const startTime = new Date(nextRestartMs);
+    const endTime = new Date(nextRestartMs + 5 * 60 * 1000); // 5 min window
+
+    const title = s.title || "FiveM Server";
+    await guild.scheduledEvents
+      .create({
+        name: `${title} - Scheduled Restart`,
+        scheduledStartTime: startTime,
+        scheduledEndTime: endTime,
+        privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
+        entityType: GuildScheduledEventEntityType.External,
+        description: `Scheduled server restart for ${title}. Estimated downtime: ~5 minutes.`,
+        entityMetadata: {
+          location: s.baseUrl || "FiveM Server",
+        },
+      })
+      .catch(() => null);
+
+    st.lastRestartEventAt = now;
+    await ctx.persistDb().catch(() => null);
+  } catch (_) {}
 }
 
 function register(ctx) {
@@ -1194,6 +1348,8 @@ function register(ctx) {
       const latest = ctx.getDb();
       if (latest.fivem?.settings?.enabled) {
         await doPoll(ctx).catch(() => null);
+        await updateVoiceChannelStatus(ctx).catch(() => null);
+        await createRestartEvent(ctx).catch(() => null);
       }
 
       scheduleNext();
@@ -1208,6 +1364,8 @@ function register(ctx) {
     const db = ctx.getDb();
     if (db.fivem?.settings?.enabled) {
       await doPoll(ctx).catch(() => null);
+      await updateVoiceChannelStatus(ctx).catch(() => null);
+      await createRestartEvent(ctx).catch(() => null);
     }
   });
 }

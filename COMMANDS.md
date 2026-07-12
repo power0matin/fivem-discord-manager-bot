@@ -1,8 +1,8 @@
-# Command Reference — FiveM Discord Manager Bot
+# Command Reference -- FiveM Discord Manager Bot
 
 This document is a practical cheat sheet for all **currently supported commands** across modules.
 
-> Prefix commands (legacy) use `.` by default and can be changed via `PREFIX` in `.env`.  
+> Prefix commands (legacy) use `.` by default and can be changed via `PREFIX` in `.env`.
 > Slash commands are the recommended way to configure **Welcome / Tickets / FiveM / Setup**.
 
 ## Permissions Model
@@ -52,12 +52,12 @@ What it configures (best-effort depending on your build):
 - Scan interval
 - Discovery options (optional)
 
-## `/welcome` — Welcome System
+## `/welcome` -- Welcome System
 
 Welcome sends:
 
 - Message content only: `||@mention||`
-- An embed below it (no mention in embed), with user avatar thumbnail
+- An embed below it (no mention in embed), with user avatar thumbnail and optional banner image
 - Two link buttons (e.g., Rules / Website)
 
 ### `/welcome toggle`
@@ -85,8 +85,8 @@ Set the embed description template.
 
 Placeholders:
 
-- `{user}` — user tag/username
-- `{server}` — server name
+- `{user}` -- user tag/username
+- `{server}` -- server name
 
 > Mentions are stripped from embed output by design.
 
@@ -122,6 +122,30 @@ Enable/disable DM and optionally set a DM template.
 
   - `/welcome set-dm enabled:false`
 
+### `/welcome set-color`
+
+Set or clear the welcome embed color.
+
+- Set color:
+
+  - `/welcome set-color color:"#57F287"`
+
+- Clear color:
+
+  - `/welcome set-color clear:true`
+
+### `/welcome set-banner`
+
+Set or clear the welcome embed banner image.
+
+- Set banner:
+
+  - `/welcome set-banner url:"https://example.com/banner.png"`
+
+- Clear banner:
+
+  - `/welcome set-banner clear:true`
+
 ### `/welcome test`
 
 Sends a test welcome (best-effort).
@@ -135,11 +159,11 @@ Show current welcome settings.
 
 - `/welcome show`
 
-## `/tickets` — Ticket System
+## `/tickets` -- Ticket System
 
 Ticket module provides:
 
-- A panel message with a “Create Ticket” button
+- A panel message with a "Create Ticket" button
 - Private ticket channels under a category
 - Staff role access
 - Close workflow (button + confirmation)
@@ -189,7 +213,7 @@ Show current ticket settings.
 
 - `/tickets show`
 
-## `/fivem` — FiveM Server Status
+## `/fivem` -- FiveM Server Status
 
 FiveM module can publish or edit a live status message.
 
@@ -234,6 +258,65 @@ Fetch status once and show the result (debug / manual check).
 Show current FiveM settings.
 
 - `/fivem show`
+
+### `/fivem set-title`
+
+Set the status card title.
+
+- `/fivem set-title title:"Nox RP v3.1"`
+
+### `/fivem set-description`
+
+Set the short description/tagline.
+
+- `/fivem set-description text:"Welcome to Nox RP!"`
+
+### `/fivem set-banner`
+
+Set or clear the banner image shown in the embed.
+
+- `/fivem set-banner url:"https://example.com/banner.png"`
+- `/fivem set-banner clear:true`
+
+### `/fivem set-website`
+
+Set the website button.
+
+- `/fivem set-website url:"https://example.com" label:"Website"`
+
+### `/fivem set-connect`
+
+Set the connect button URL.
+
+- `/fivem set-connect url:"fivem://connect/sv.example.com" label:"Connect"`
+- `/fivem set-connect url:"https://example.com" label:"Join Server"`
+
+### `/fivem set-connect-command`
+
+Set the F8 connect command shown in the card.
+
+- `/fivem set-connect-command command:"connect sv.example.com"`
+
+### `/fivem set-restart-times`
+
+Set daily restart times for the restart countdown.
+
+- `/fivem set-restart-times times:"04:00,16:00"`
+- `/fivem set-restart-times clear:true`
+
+### `/fivem set-voice-status`
+
+Set a voice channel to show server status in its name.
+
+- `/fivem set-voice-status channel:#voice-status`
+- `/fivem set-voice-status clear:true`
+
+### `/fivem set-scheduled-events`
+
+Enable/disable auto-creation of Discord Scheduled Events for restarts.
+
+- `/fivem set-scheduled-events enabled:true`
+- `/fivem set-scheduled-events enabled:false`
 
 # Prefix Commands (Legacy Stream Notifier)
 
@@ -464,7 +547,7 @@ When mapping a streamer to a Discord user, supported formats typically include:
 3. Raw numeric user ID: `123456789012345678`
 
 Tip:
-If you typed `@username` but didn’t select from autocomplete, it might not resolve as a valid mention. Raw ID always works.
+If you typed `@username` but didn't select from autocomplete, it might not resolve as a valid mention. Raw ID always works.
 
 ### Module separation
 

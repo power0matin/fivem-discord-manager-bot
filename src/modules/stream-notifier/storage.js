@@ -30,7 +30,7 @@ const DEFAULT_DB = {
       baseUrl: "http://178.22.124.71:30120", // e.g. http://127.0.0.1:30120
 
       // Where to post/edit the single status message
-      statusChannelId: 1426288178427461642,
+      statusChannelId: null,
       statusMessageId: null, // edited in-place to avoid spam
 
       // Polling (recommended: every 5 minutes)
@@ -65,6 +65,12 @@ const DEFAULT_DB = {
       maxPlayersShown: 10,
 
       restartTimes: ["05:00"],
+
+      // Voice channel status (shows server online/offline in channel name)
+      voiceStatusChannelId: null,
+
+      // Auto-create Discord Scheduled Events for restarts
+      enableScheduledEvents: false,
     },
     state: {
       consecutiveFailures: 0,
@@ -83,20 +89,78 @@ const DEFAULT_DB = {
   tickets: {
     settings: {
       enabled: false,
+
+      // --- legacy (keep for backward compatibility) ---
       categoryId: null,
       staffRoleIds: [],
-      logChannelId: null,
-
       panelChannelId: null,
       panelMessageId: null,
 
+      // --- current ---
+      logChannelId: null,
       ticketNamePrefix: "ticket",
       maxOpenPerUser: 1,
       allowUserClose: true,
+
+      // Enable parsing "-pend @User" inside ticket channels (requires Message Content Intent)
+      enableTextCommands: false,
+
+      // Professional panel (stored in data.json)
+      panel: {
+        channelId: null,
+        messageId: null,
+        title: "Support Center",
+        description:
+          "Choose a category below to open a private ticket.\n\n" +
+          "Please provide complete details (screenshots, IDs, timestamps) for faster resolution.",
+        footer: "Abuse/spam may lead to penalties. One ticket per category.",
+        buttonsPerRow: 2, // 1..5
+      },
+
+      // Ticket types: each button -> separate Discord category
+      // key: stable identifier used in customId and state
+      types: {
+        support: {
+          label: "Support",
+          emoji: "🎫",
+          categoryId: null,
+
+          // Roles with access to channels (in addition to bot)
+          staffRoleIds: [],
+
+          // Roles to ping when ticket created/claimed (outside embed)
+          mentionRoleIds: [],
+
+          // Message posted in ticket on creation
+          introMessage:
+            "Hello {mention}.\n" +
+            "Please describe your issue with full details.\n" +
+            "If this is a report, include proof (clip/screenshot) and player IDs.",
+
+          // Optional voice move action
+          voiceMove: {
+            enabled: false,
+            targetVoiceChannelId: null,
+            label: "Move to Staff Voice",
+            emoji: "🔊",
+          },
+        },
+      },
     },
+
     state: {
-      openByUserId: {}, // userId -> channelId
-      openByChannelId: {}, // channelId -> userId
+      // --- legacy (keep) ---
+      openByUserId: {}, // userId -> channelId (old single-ticket mapping)
+      openByChannelId: {}, // channelId -> userId (old)
+
+      // --- new state ---
+      // userId -> { [typeKey]: channelId }
+      byUser: {},
+
+      // channelId -> metadata
+      channels: {
+        // [channelId]: { ownerId, typeKey, createdAt, claimedById, assignedToId, openMessageId }
+      },
     },
   },
 
@@ -111,7 +175,7 @@ const DEFAULT_DB = {
       // NEW: embed-specific templates (no mention inside embed)
       embedTitle: "NOX Community",
       embedDescriptionTemplate:
-        "Welcome to the NOX Community! We are glad to have you./n",
+        "Welcome to the NOX Community! We are glad to have you.",
 
       // NEW: link buttons under embed
       buttons: {
@@ -124,6 +188,7 @@ const DEFAULT_DB = {
       dmEnabled: false,
       dmTemplate: "Welcome to {server}!",
       autoRoleId: null,
+      bannerImageUrl: null,
     },
   },
 
@@ -200,17 +265,87 @@ async function loadDb() {
     db.fivem.state = { ...DEFAULT_DB.fivem.state, ...(db.fivem.state ?? {}) };
 
     db.tickets ||= structuredClone(DEFAULT_DB.tickets);
+
+    // Merge settings (shallow)
     db.tickets.settings = {
       ...DEFAULT_DB.tickets.settings,
       ...(db.tickets.settings ?? {}),
     };
+
+    // Merge nested settings objects
+    db.tickets.settings.panel = {
+      ...DEFAULT_DB.tickets.settings.panel,
+      ...(db.tickets.settings.panel ?? {}),
+    };
+    db.tickets.settings.types = {
+      ...DEFAULT_DB.tickets.settings.types,
+      ...(db.tickets.settings.types ?? {}),
+    };
+
+    // Ensure legacy arrays exist
+    db.tickets.settings.staffRoleIds ||= [];
+
+    // Ensure state
     db.tickets.state = {
       ...DEFAULT_DB.tickets.state,
       ...(db.tickets.state ?? {}),
     };
-    db.tickets.settings.staffRoleIds ||= [];
     db.tickets.state.openByUserId ||= {};
     db.tickets.state.openByChannelId ||= {};
+    db.tickets.state.byUser ||= {};
+    db.tickets.state.channels ||= {};
+
+    // ---- Migration (legacy -> new) ----
+
+    // Panel legacy -> new
+    if (!db.tickets.settings.panel.channelId && db.tickets.settings.panelChannelId) {
+      db.tickets.settings.panel.channelId = db.tickets.settings.panelChannelId;
+    }
+    if (!db.tickets.settings.panel.messageId && db.tickets.settings.panelMessageId) {
+      db.tickets.settings.panel.messageId = db.tickets.settings.panelMessageId;
+    }
+
+    // Ensure at least one type exists
+    db.tickets.settings.types.support ||= structuredClone(
+      DEFAULT_DB.tickets.settings.types.support
+    );
+
+    // Type support inherits old single-category settings if needed
+    const supportType = db.tickets.settings.types.support;
+    if (!supportType.categoryId && db.tickets.settings.categoryId) {
+      supportType.categoryId = db.tickets.settings.categoryId;
+    }
+    if (
+      Array.isArray(db.tickets.settings.staffRoleIds) &&
+      db.tickets.settings.staffRoleIds.length > 0 &&
+      (!Array.isArray(supportType.staffRoleIds) || supportType.staffRoleIds.length === 0)
+    ) {
+      supportType.staffRoleIds = [...db.tickets.settings.staffRoleIds];
+    }
+
+    // Legacy openByChannelId -> channels meta
+    for (const [chId, ownerId] of Object.entries(db.tickets.state.openByChannelId)) {
+      if (!db.tickets.state.channels[chId] && typeof ownerId === "string" && ownerId) {
+        db.tickets.state.channels[chId] = {
+          ownerId,
+          typeKey: "support",
+          createdAt: 0,
+          claimedById: null,
+          assignedToId: null,
+          openMessageId: null,
+        };
+      }
+    }
+
+    // Legacy openByUserId -> byUser
+    for (const [userId, chId] of Object.entries(db.tickets.state.openByUserId)) {
+      if (typeof chId === "string" && chId) {
+        db.tickets.state.byUser[userId] ||= {};
+        if (!db.tickets.state.byUser[userId].support) {
+          db.tickets.state.byUser[userId].support = chId;
+        }
+      }
+    }
 
     db.welcome ||= structuredClone(DEFAULT_DB.welcome);
     db.welcome.settings = {

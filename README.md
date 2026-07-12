@@ -18,9 +18,9 @@ A **modular Discord bot** for **FiveM communities**.
 It currently ships with:
 
 - **Stream Notifier** (Twitch + Kick alerts with filters)
-- **FiveM Server Status** (auto-updating status card with players, restart ETA, optional server uptime, and buttons)
+- **FiveM Server Status** (auto-updating status card with players, restart ETA, optional server uptime, buttons, voice channel status, and scheduled events)
 - **Tickets** (panel + private ticket channels + close workflow)
-- **Welcome** (clean welcome message with buttons + user avatar thumbnail)
+- **Welcome** (clean welcome message with banner image, buttons + user avatar thumbnail)
 
 Designed for reliability, rate-limit safety, and clean UX.
 
@@ -54,6 +54,7 @@ Key behaviors:
 - Optional `@here` mention (toggleable)
 - Optional stored Discord mention per streamer
 - Persistent state and health/backoff status
+- Kick-priority: when streamer is live on both platforms, only Kick notification is sent
 
 ### 2) FiveM Status
 
@@ -73,8 +74,13 @@ Buttons / UX:
 
 - **Website button** (http/https link button)
 - **Connect button**
-  - If `connectUrl` is **http/https** → Discord link button
-  - If `connectUrl` is **fivem://...** → custom button that replies ephemerally with connect instructions + the link
+  - If `connectUrl` is **http/https** -> Discord link button
+  - If `connectUrl` is **fivem://...** -> custom button that replies ephemerally with connect instructions + the link
+
+New features:
+
+- **Channel Voice Status** (`/fivem set-voice-status`): Shows server online/offline status in a voice channel name (e.g., "🟢 Server Online")
+- **Scheduled Events** (`/fivem set-scheduled-events`): Auto-creates Discord Scheduled Events for upcoming server restarts
 
 Data sources (FiveM endpoints):
 
@@ -96,6 +102,8 @@ Ticket system designed for FiveM communities:
 - Staff role access
 - Close workflow with confirm/cancel
 - Optional log channel
+- Multi-type support (each type -> separate category + button)
+- Transcript export on close
 
 ### 4) Welcome
 
@@ -107,8 +115,10 @@ Welcome module sends a clean message when someone joins.
 - The message content is ONLY: `||@mention||`
 - Under it, an embed is posted with:
   - Thumbnail = user avatar
+  - Optional banner image
   - Title + description (no mention)
   - Two link buttons (e.g., Rules, Website)
+  - Custom embed color
 
 ## Quick Start
 
@@ -191,6 +201,14 @@ Restart schedule:
 
 - `/fivem set-restart-times times:"05:00,17:00"` or `/fivem set-restart-times clear:true`
 
+Voice status:
+
+- `/fivem set-voice-status channel:#voice-channel` or `/fivem set-voice-status clear:true`
+
+Scheduled events:
+
+- `/fivem set-scheduled-events enabled:true` or `/fivem set-scheduled-events enabled:false`
+
 ### `/tickets`
 
 Ticket system management:
@@ -212,6 +230,10 @@ Welcome system:
 - `/welcome set-title title:"Welcome to the NOX Community!"`
 - `/welcome set-message template:"Welcome to the NOX Community! We are glad to have you."`
 - `/welcome set-buttons label1:"Rules" url1:"https://..." label2:"Website" url2:"https://..."`
+- `/welcome set-color color:"#57F287"` or `/welcome set-color clear:true`
+- `/welcome set-banner url:"https://..."` or `/welcome set-banner clear:true`
+- `/welcome set-dm enabled:true template:"Welcome to {server}!"`
+- `/welcome set-role role:@Member` or `/welcome set-role clear:true`
 - `/welcome test`
 - `/welcome show`
 
@@ -237,6 +259,7 @@ After first run, **`data.json` is the source of truth** so you can configure via
 | ------------------ | ------------------------------------------------------------------------------------------------- |
 | `DISCORD_GUILD_ID` | If set, registers slash commands to this guild (instant)                                          |
 | `ALLOWED_ROLE_IDS` | Comma-separated role IDs allowed to use admin commands. If empty, falls back to **Manage Server** |
+| `DISCORD_NOTIFY_CHANNEL_ID` | Default notify channel (can be overridden via `/setup` wizard) |
 
 ### Stream Notifier (optional per platform)
 
@@ -247,14 +270,21 @@ After first run, **`data.json` is the source of truth** so you can configure via
 | `KICK_CLIENT_ID`       | Kick client id   |
 | `KICK_CLIENT_SECRET`   | Kick secret      |
 
+### FiveM Status (optional)
+
+| Variable                            | Description                                        |
+| ----------------------------------- | -------------------------------------------------- |
+| `FIVEM_VOICE_STATUS_CHANNEL_ID`     | Voice channel to show server status in name        |
+| `FIVEM_ENABLE_SCHEDULED_EVENTS`     | Auto-create Discord events for restarts            |
+
 ## Data & Storage
 
 `data.json` stores:
 
 - Stream Notifier settings + streamer lists
-- FiveM status card settings (buttons, restart schedule, embed theme) + module backoff/health state
+- FiveM status card settings (buttons, restart schedule, embed theme, voice status, scheduled events) + module backoff/health state
 - Tickets settings + open ticket mappings
-- Welcome settings (templates/buttons/roles)
+- Welcome settings (templates/buttons/roles/banner)
 - Message IDs for edit-in-place behavior (FiveM status / Stream alerts)
 
 `data.json` is intentionally gitignored.
@@ -278,6 +308,7 @@ Module-specific:
 - **Tickets**: Manage Channels, Manage Messages (delete/close), View Channels
 - **Stream Notifier**: Manage Messages (delete live alert on offline), Mention Everyone (if using `@here`)
 - **Welcome**: Send Messages, Embed Links, (optional) Manage Roles (auto-role)
+- **FiveM Status**: Manage Channels (voice status rename), Manage Events (scheduled events)
 
 ## Deploy
 
@@ -346,14 +377,14 @@ Ensure bot has:
 This is expected in **STRICT uptime mode**.
 
 The bot only displays uptime if your FiveM server explicitly publishes it via `/dynamic.json` or `/info.json` (including `vars`).
-If your server does not expose an uptime variable/convar, the embed shows `--` to avoid misleading “bot uptime”.
+If your server does not expose an uptime variable/convar, the embed shows `--` to avoid misleading "bot uptime".
 
 Tip:
 
 - Expose a convar/variable like `uptimeSeconds` (or any key containing `uptime`) on the server side so it appears under `vars`.
 - Then the bot can parse and render it.
 
-### FiveM endpoints are blocked (shows Offline / “Nope.”)
+### FiveM endpoints are blocked (shows Offline / "Nope.")
 
 If the bot reports that endpoints are blocked, your server (or a proxy/firewall) is likely returning `"Nope."` for:
 
@@ -363,13 +394,29 @@ If the bot reports that endpoints are blocked, your server (or a proxy/firewall)
 
 Ensure the bot host can reach your FiveM server port (default `30120`) and that these endpoints are not filtered.
 
+### Voice status channel not updating
+
+Ensure:
+
+- The channel is a **Voice Channel** (not text)
+- Bot has **Manage Channels** permission
+- `/fivem set-voice-status` is configured with a valid channel
+
+### Scheduled events not creating
+
+Ensure:
+
+- Restart times are configured (`/fivem set-restart-times`)
+- Bot has **Manage Events** permission
+- Enable with `/fivem set-scheduled-events enabled:true`
+
 ## Roadmap
 
-- [ ] Convert to a true top-level modular core (single client in `src/index.js`, modules register on it)
 - [ ] Multi-server configuration (per-guild data)
 - [ ] Docker support
 - [ ] Expand slash commands for Stream Notifier streamer management
 - [ ] More FiveM utilities (server rules sync, whitelist tools, moderation helpers)
+- [ ] Forum channel support for tickets
 
 ## Contributing
 
@@ -388,11 +435,11 @@ See: [SECURITY.md](SECURITY.md)
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+MIT -- see [LICENSE](LICENSE)
 
 ## Contact
 
-**Matin Shahabadi (متین شاه‌آبادی / متین شاه آبادی)**
+**Matin Shahabadi**
 
 - Website: [matinshahabadi.ir](https://matinshahabadi.ir)
 - Email: [me@matinshahabadi.ir](mailto:me@matinshahabadi.ir)
