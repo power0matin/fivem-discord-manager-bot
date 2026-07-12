@@ -120,6 +120,13 @@ Welcome module sends a clean message when someone joins.
   - Two link buttons (e.g., Rules, Website)
   - Custom embed color
 
+Additional features:
+
+- **Anti-raid protection**: Rate-limit new member joins; kicks suspicious accounts automatically
+- **Goodbye message**: Send an embed when members leave
+- **Server stats**: Display member count in a voice channel name (e.g., "Members: 1,234")
+- **Log channel**: Anti-raid alerts sent to a configured channel
+
 ## Quick Start
 
 ### Prerequisites
@@ -236,6 +243,24 @@ Welcome system:
 - `/welcome set-role role:@Member` or `/welcome set-role clear:true`
 - `/welcome test`
 - `/welcome show`
+
+Anti-raid:
+
+- `/welcome set-anti-raid enabled:true threshold:5`
+
+Goodbye:
+
+- `/welcome set-goodbye enabled:true channel:#goodbye`
+- `/welcome set-goodbye-message title:"Goodbye!" message:"See you next time, {user}!"`
+
+Server stats:
+
+- `/welcome set-stats channel:#stats format:"Members: {total}"`
+- `/welcome set-stats clear:true`
+
+Logging:
+
+- `/welcome set-log-channel channel:#logs`
 
 ## Configuration
 

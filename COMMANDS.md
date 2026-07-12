@@ -159,6 +159,56 @@ Show current welcome settings.
 
 - `/welcome show`
 
+### `/welcome set-anti-raid`
+
+Configure anti-raid protection. When enabled, if too many members join in a short time, new joins are automatically kicked.
+
+- `/welcome set-anti-raid enabled:true threshold:5`
+- `/welcome set-anti-raid enabled:false`
+
+Parameters:
+
+- `enabled` (required): true/false
+- `threshold` (optional): Max joins per 60 seconds before raid alert (default: 5, range: 2-50)
+
+### `/welcome set-goodbye`
+
+Configure goodbye message when members leave.
+
+- `/welcome set-goodbye enabled:true channel:#goodbye`
+- `/welcome set-goodbye enabled:false`
+
+### `/welcome set-goodbye-message`
+
+Set goodbye embed title, message, and color.
+
+- `/welcome set-goodbye-message title:"Goodbye!" message:"See you next time, {user}!" color:"#ED4245"`
+
+Placeholders:
+
+- `{user}` -- the leaving member's tag
+- `{server}` -- server name
+
+### `/welcome set-stats`
+
+Show member count in a voice channel name (auto-updates on join/leave).
+
+- `/welcome set-stats channel:#member-count format:"Members: {total}"`
+- `/welcome set-stats format:"Online: {online} / Total: {total}"`
+- `/welcome set-stats clear:true`
+
+Placeholders:
+
+- `{total}` -- total member count
+- `{online}` -- online member count
+
+### `/welcome set-log-channel`
+
+Set log channel for anti-raid alerts.
+
+- `/welcome set-log-channel channel:#mod-logs`
+- `/welcome set-log-channel clear:true`
+
 ## `/tickets` -- Ticket System
 
 Ticket module provides:

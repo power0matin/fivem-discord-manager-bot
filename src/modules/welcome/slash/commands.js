@@ -144,6 +144,113 @@ const welcome = new SlashCommandBuilder()
   )
   .addSubcommand((sc) =>
     sc.setName("show").setDescription("Show current welcome settings (safe).")
+  )
+
+  // Anti-raid
+  .addSubcommand((sc) =>
+    sc
+      .setName("set-anti-raid")
+      .setDescription("Configure anti-raid protection.")
+      .addBooleanOption((o) =>
+        o
+          .setName("enabled")
+          .setDescription("Enable/disable anti-raid")
+          .setRequired(true)
+      )
+      .addIntegerOption((o) =>
+        o
+          .setName("threshold")
+          .setDescription("Max joins per 60 seconds before raid alert (default: 5)")
+          .setMinValue(2)
+          .setMaxValue(50)
+          .setRequired(false)
+      )
+  )
+
+  // Goodbye message
+  .addSubcommand((sc) =>
+    sc
+      .setName("set-goodbye")
+      .setDescription("Configure goodbye message when members leave.")
+      .addBooleanOption((o) =>
+        o
+          .setName("enabled")
+          .setDescription("Enable/disable goodbye message")
+          .setRequired(true)
+      )
+      .addChannelOption((o) =>
+        o
+          .setName("channel")
+          .setDescription("Channel for goodbye messages")
+          .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+          .setRequired(false)
+      )
+  )
+  .addSubcommand((sc) =>
+    sc
+      .setName("set-goodbye-message")
+      .setDescription("Set goodbye embed title and message.")
+      .addStringOption((o) =>
+        o.setName("title").setDescription("Goodbye embed title").setRequired(false)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("message")
+          .setDescription("Goodbye message (use {user}, {server})")
+          .setRequired(false)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("color")
+          .setDescription("Hex color: #RRGGBB")
+          .setRequired(false)
+      )
+  )
+
+  // Server stats
+  .addSubcommand((sc) =>
+    sc
+      .setName("set-stats")
+      .setDescription("Show member count in a voice channel name.")
+      .addChannelOption((o) =>
+        o
+          .setName("channel")
+          .setDescription("Voice channel for stats display")
+          .addChannelTypes(ChannelType.GuildVoice)
+          .setRequired(false)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("format")
+          .setDescription("Format: use {total} and {online} (e.g. 'Members: {total}')")
+          .setRequired(false)
+      )
+      .addBooleanOption((o) =>
+        o
+          .setName("clear")
+          .setDescription("true to disable stats display")
+          .setRequired(false)
+      )
+  )
+
+  // Log channel (for anti-raid alerts)
+  .addSubcommand((sc) =>
+    sc
+      .setName("set-log-channel")
+      .setDescription("Set log channel for anti-raid alerts.")
+      .addChannelOption((o) =>
+        o
+          .setName("channel")
+          .setDescription("Text channel for logs")
+          .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+          .setRequired(false)
+      )
+      .addBooleanOption((o) =>
+        o
+          .setName("clear")
+          .setDescription("true to clear log channel")
+          .setRequired(false)
+      )
   );
 
 module.exports = {

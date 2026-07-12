@@ -6,10 +6,16 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  StringSelectMenuBuilder,
+  ComponentType,
 } = require("discord.js");
 
 // Discord API ephemeral flag is 1<<6 (=64). Prefer library constant if available.
 const EPHEMERAL_FLAG = MessageFlagsBitField?.Flags?.Ephemeral ?? 1 << 6;
+
+// Anti-raid: track recent joins per guild
+const recentJoins = new Map(); // guildId -> [{ userId, joinedAt }]
+const ANTI_RAID_WINDOW_MS = 60_000; // 1 minute window
 
 function toFlagsPayload(payload) {
   if (!payload || typeof payload !== "object") return payload;
@@ -196,6 +202,41 @@ async function sendWelcome(ctx, member, opts = {}) {
 
   const force = Boolean(opts.force);
   if (!s?.enabled && !force) return;
+
+  // Anti-raid: check if too many joins in short time
+  if (s.antiRaidEnabled && !force) {
+    const guildId = member.guild?.id;
+    if (guildId) {
+      const now = Date.now();
+      if (!recentJoins.has(guildId)) recentJoins.set(guildId, []);
+
+      const joins = recentJoins.get(guildId);
+      // Clean old entries
+      const filtered = joins.filter((j) => now - j.joinedAt < ANTI_RAID_WINDOW_MS);
+      recentJoins.set(guildId, filtered);
+
+      const threshold = s.antiRaidThreshold || 5;
+      if (filtered.length >= threshold) {
+        // Raid detected: kick the user and log
+        await member
+          .kick("Anti-raid: too many recent joins")
+          .catch(() => null);
+
+        // Log to log channel if configured
+        if (s.logChannelId) {
+          const logCh = await ctx.client.channels.fetch(s.logChannelId).catch(() => null);
+          if (logCh && "send" in logCh) {
+            await logCh.send({
+              content: `🚨 **Anti-raid triggered**: <@${member.id}> kicked (${filtered.length} joins in ${ANTI_RAID_WINDOW_MS / 1000}s)`,
+            }).catch(() => null);
+          }
+        }
+        return;
+      }
+
+      filtered.push({ userId: member.id, joinedAt: now });
+    }
+  }
 
   // Auto-role
   if (s.autoRoleId) {
@@ -520,6 +561,122 @@ async function handleInteraction(interaction, ctx) {
     return true;
   }
 
+  if (sub === "set-anti-raid") {
+    const enabled = interaction.options.getBoolean("enabled", true);
+    const threshold = interaction.options.getInteger("threshold", false);
+
+    s.antiRaidEnabled = Boolean(enabled);
+    if (threshold) s.antiRaidThreshold = threshold;
+
+    await ctx.persistDb().catch(() => null);
+    await safeReply(interaction, {
+      ephemeral: true,
+      content: `✅ Anti-raid is now: **${s.antiRaidEnabled ? "ON" : "OFF"}**${
+        threshold ? ` (threshold: ${threshold})` : ""
+      }`,
+    });
+    return true;
+  }
+
+  if (sub === "set-goodbye") {
+    const enabled = interaction.options.getBoolean("enabled", true);
+    const ch = interaction.options.getChannel("channel", false);
+
+    s.goodbyeEnabled = Boolean(enabled);
+    if (ch) s.goodbyeChannelId = ch.id;
+
+    await ctx.persistDb().catch(() => null);
+    await safeReply(interaction, {
+      ephemeral: true,
+      content: `✅ Goodbye message is now: **${s.goodbyeEnabled ? "ON" : "OFF"}**${
+        ch ? ` in <#${ch.id}>` : ""
+      }`,
+    });
+    return true;
+  }
+
+  if (sub === "set-goodbye-message") {
+    const title = interaction.options.getString("title", false);
+    const message = interaction.options.getString("message", false);
+    const color = interaction.options.getString("color", false);
+
+    if (title) s.goodbyeTitle = String(title).slice(0, 256);
+    if (message) s.goodbyeMessage = String(message).slice(0, 1900);
+    if (color) {
+      const cleaned = String(color).trim().replace(/^#/g, "").replace(/^0x/i, "");
+      if (/^[0-9a-fA-F]{6}$/.test(cleaned)) {
+        s.goodbyeColor = `#${cleaned.toUpperCase()}`;
+      }
+    }
+
+    await ctx.persistDb().catch(() => null);
+    await safeReply(interaction, {
+      ephemeral: true,
+      content: "✅ Goodbye message updated.",
+    });
+    return true;
+  }
+
+  if (sub === "set-stats") {
+    const clear = interaction.options.getBoolean("clear", false) || false;
+    const ch = interaction.options.getChannel("channel", false);
+    const format = interaction.options.getString("format", false);
+
+    if (clear) {
+      s.statsVoiceChannelId = null;
+      await ctx.persistDb().catch(() => null);
+      await safeReply(interaction, {
+        ephemeral: true,
+        content: "✅ Server stats display disabled.",
+      });
+      return true;
+    }
+
+    if (ch) s.statsVoiceChannelId = ch.id;
+    if (format) s.statsFormat = String(format).slice(0, 100);
+
+    await ctx.persistDb().catch(() => null);
+    await updateServerStats(ctx).catch(() => null);
+    await safeReply(interaction, {
+      ephemeral: true,
+      content: `✅ Server stats updated.${
+        ch ? ` Voice channel: <#${ch.id}>` : ""
+      }`,
+    });
+    return true;
+  }
+
+  if (sub === "set-log-channel") {
+    const clear = interaction.options.getBoolean("clear", false) || false;
+    const ch = interaction.options.getChannel("channel", false);
+
+    if (clear) {
+      s.logChannelId = null;
+      await ctx.persistDb().catch(() => null);
+      await safeReply(interaction, {
+        ephemeral: true,
+        content: "✅ Log channel cleared.",
+      });
+      return true;
+    }
+
+    if (!ch) {
+      await safeReply(interaction, {
+        ephemeral: true,
+        content: "❌ Provide a channel or set clear=true.",
+      });
+      return true;
+    }
+
+    s.logChannelId = ch.id;
+    await ctx.persistDb().catch(() => null);
+    await safeReply(interaction, {
+      ephemeral: true,
+      content: `✅ Log channel set to <#${ch.id}>`,
+    });
+    return true;
+  }
+
   if (sub === "show") {
     const b = s.buttons || {};
     const btn1 = b.button1Url
@@ -580,6 +737,27 @@ async function handleInteraction(interaction, ctx) {
           value: `1) ${btn1}\n2) ${btn2}`,
           inline: false,
         },
+        {
+          name: "Anti-Raid",
+          value: s.antiRaidEnabled
+            ? `ON (threshold: ${s.antiRaidThreshold || 5})`
+            : "OFF",
+          inline: true,
+        },
+        {
+          name: "Goodbye",
+          value: s.goodbyeEnabled
+            ? `ON${s.goodbyeChannelId ? ` in <#${s.goodbyeChannelId}>` : ""}`
+            : "OFF",
+          inline: true,
+        },
+        {
+          name: "Server Stats",
+          value: s.statsVoiceChannelId
+            ? `<#${s.statsVoiceChannelId}>`
+            : "_None_",
+          inline: true,
+        },
       ],
     });
 
@@ -588,9 +766,84 @@ async function handleInteraction(interaction, ctx) {
   }
 }
 
+async function updateServerStats(ctx) {
+  try {
+    const db = ctx.getDb();
+    const s = db.welcome?.settings || {};
+
+    if (!s.statsVoiceChannelId) return;
+
+    const guild = ctx.client.guilds.cache.first();
+    if (!guild) return;
+
+    const channel = await ctx.client.channels
+      .fetch(s.statsVoiceChannelId)
+      .catch(() => null);
+
+    if (!channel) return;
+    if (channel.type !== 4) return; // GuildVoice
+
+    const totalMembers = guild.memberCount;
+    const onlineMembers = guild.members.cache.filter(
+      (m) => m.presence?.status !== "offline"
+    ).size;
+
+    const format = s.statsFormat || "Members: {total}";
+    const name = format
+      .replaceAll("{total}", totalMembers)
+      .replaceAll("{online}", onlineMembers)
+      .slice(0, 100);
+
+    await channel.setName(name).catch(() => null);
+  } catch (_) {}
+}
+
 function register(ctx) {
   ctx.client.on(Events.GuildMemberAdd, async (member) => {
     await sendWelcome(ctx, member).catch(() => null);
+    await updateServerStats(ctx).catch(() => null);
+  });
+
+  ctx.client.on(Events.GuildMemberRemove, async (member) => {
+    // Goodbye message
+    try {
+      const db = ctx.getDb();
+      const s = db.welcome?.settings || {};
+
+      if (s.goodbyeEnabled && s.goodbyeChannelId) {
+        const channel = await ctx.client.channels
+          .fetch(s.goodbyeChannelId)
+          .catch(() => null);
+
+        if (channel && "send" in channel) {
+          const title = s.goodbyeTitle || "Goodbye!";
+          const desc = (s.goodbyeMessage || "See you next time, {user}!")
+            .replaceAll("{user}", member.user?.tag || "someone")
+            .replaceAll("{server}", member.guild?.name || "server");
+
+          const embed = ctx.makeEmbed(null, {
+            tone: "WARN",
+            chrome: "minimal",
+            footerMode: "none",
+            titleIcon: false,
+            title,
+            description: desc.slice(0, 4000),
+            color: s.goodbyeColor || null,
+            footer: { text: `${member.guild?.name || "Server"} • Goodbye` },
+            timestamp: "always",
+          });
+
+          await channel.send({ embeds: [embed] }).catch(() => null);
+        }
+      }
+    } catch (_) {}
+
+    await updateServerStats(ctx).catch(() => null);
+  });
+
+  // Update stats on ready
+  ctx.client.on(Events.ClientReady, async () => {
+    await updateServerStats(ctx).catch(() => null);
   });
 }
 

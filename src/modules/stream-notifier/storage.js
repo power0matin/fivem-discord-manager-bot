@@ -189,6 +189,24 @@ const DEFAULT_DB = {
       dmTemplate: "Welcome to {server}!",
       autoRoleId: null,
       bannerImageUrl: null,
+
+      // Anti-raid protection
+      antiRaidEnabled: false,
+      antiRaidThreshold: 5,
+
+      // Goodbye message
+      goodbyeEnabled: false,
+      goodbyeChannelId: null,
+      goodbyeTitle: "Goodbye!",
+      goodbyeMessage: "See you next time, {user}!",
+      goodbyeColor: null,
+
+      // Server stats in voice channel
+      statsVoiceChannelId: null,
+      statsFormat: "Members: {total}",
+
+      // Log channel (for anti-raid alerts)
+      logChannelId: null,
     },
   },
 
@@ -328,7 +346,7 @@ async function loadDb() {
       if (!db.tickets.state.channels[chId] && typeof ownerId === "string" && ownerId) {
         db.tickets.state.channels[chId] = {
           ownerId,
-          typeKey: "support",
+          typeKey: "support", 
           createdAt: 0,
           claimedById: null,
           assignedToId: null,

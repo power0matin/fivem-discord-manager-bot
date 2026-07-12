@@ -1,7 +1,7 @@
 {
   "name": "fivem-discord-manager-bot",
-  "version": "2.0.0",
-  "description": "Discord bot that monitors Kick & Twitch for GTA V streams with 'Nox RP' in the title and posts @here + stream link in a Discord channel. Includes FiveM server status, welcome system, and ticket system.",
+  "version": "2.1.0",
+  "description": "Modular Discord bot for FiveM communities: stream alerts (Twitch/Kick), live server status with voice channel display, ticket system, welcome with anti-raid, goodbye messages, and server stats.",
   "main": "src/index.js",
   "type": "commonjs",
   "scripts": {
