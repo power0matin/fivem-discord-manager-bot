@@ -1,0 +1,44 @@
+name: Hardening finalize
+
+on:
+  push:
+    branches:
+      - agent/production-hardening
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/production-hardening
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Apply remaining source fixes
+        run: |
+          if ! grep -q 'async function createTicketUnlocked' src/modules/tickets/index.js; then
+            node scripts/apply-hardening-2.js
+          fi
+      - name: Refresh dependency lock and validate
+        run: |
+          npm install --package-lock-only --ignore-scripts
+          npm ci
+          npm run verify
+          npm audit --audit-level=high
+      - name: Commit generated changes
+        run: |
+          if git diff --quiet -- src package-lock.json; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src package-lock.json
+          git commit -m 'fix: finalize runtime hardening and secure lockfile [skip ci]'
+          git push origin HEAD:agent/production-hardening
