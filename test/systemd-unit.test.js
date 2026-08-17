@@ -20,7 +20,8 @@ test("systemd unit pins production identity, paths and lifecycle", () => {
   has("WorkingDirectory=/opt/fivem-discord-manager-bot/current");
   has("EnvironmentFile=/etc/fivem-discord-manager-bot/bot.env");
   has("Environment=DATA_FILE=/var/lib/fivem-discord-manager-bot/data.json");
-  has("ExecStart=/usr/bin/node src/index.js");
+  has("Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+  has("ExecStart=/usr/bin/env node src/index.js");
   has("Restart=on-failure");
   has("RestartSec=5s");
   has("TimeoutStopSec=30s");
