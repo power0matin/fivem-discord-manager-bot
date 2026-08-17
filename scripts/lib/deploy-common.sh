@@ -24,8 +24,6 @@ is_test_mode() {
 
 require_root() {
   if is_test_mode; then
-    SERVICE_USER="${SERVICE_USER:-$(id -un)}"
-    SERVICE_GROUP="${SERVICE_GROUP:-$(id -gn)}"
     if [[ "$SERVICE_USER" == "fivembot" ]]; then SERVICE_USER="$(id -un)"; fi
     if [[ "$SERVICE_GROUP" == "fivembot" ]]; then SERVICE_GROUP="$(id -gn)"; fi
     export SERVICE_USER SERVICE_GROUP
@@ -64,7 +62,8 @@ validate_sleep_value() {
 }
 
 assert_safe_absolute_dir() {
-  local value="$1" label="$2"
+  local value="$1"
+  local label="$2"
   [[ "$value" == /* ]] || die "$label must be an absolute path: $value"
   case "$value" in
     /|/bin|/boot|/dev|/etc|/home|/lib|/lib64|/opt|/proc|/root|/run|/sbin|/srv|/sys|/tmp|/usr|/var)
@@ -74,14 +73,18 @@ assert_safe_absolute_dir() {
 }
 
 safe_remove_tree() {
-  local value="$1" required_prefix="$2"
+  local value="$1"
+  local required_prefix="$2"
   assert_safe_absolute_dir "$value" "remove path"
   [[ "$value" == "$required_prefix"/* ]] || die "Refusing to remove path outside $required_prefix: $value"
   rm -rf --one-file-system -- "$value"
 }
 
 install_dir() {
-  local mode="$1" owner="$2" group="$3" target="$4"
+  local mode="$1"
+  local owner="$2"
+  local group="$3"
+  local target="$4"
   if is_test_mode; then
     install -d -m "$mode" "$target"
   else
@@ -90,7 +93,11 @@ install_dir() {
 }
 
 install_file() {
-  local mode="$1" owner="$2" group="$3" source="$4" target="$5"
+  local mode="$1"
+  local owner="$2"
+  local group="$3"
+  local source="$4"
+  local target="$5"
   if is_test_mode; then
     install -m "$mode" "$source" "$target"
   else
@@ -99,34 +106,45 @@ install_file() {
 }
 
 verify_mode() {
-  local path="$1" expected="$2" actual
-  actual="$(stat -c '%a' "$path")"
-  [[ "$actual" == "$expected" ]] || die "Unexpected permissions for $path: $actual (expected $expected)"
+  local path_value="$1"
+  local expected="$2"
+  local actual
+  actual="$(stat -c '%a' "$path_value")"
+  [[ "$actual" == "$expected" ]] || die "Unexpected permissions for $path_value: $actual (expected $expected)"
 }
 
 verify_owner_group() {
-  local path="$1" expected_owner="$2" expected_group="$3" actual
+  local path_value="$1"
+  local expected_owner="$2"
+  local expected_group="$3"
+  local actual
   if is_test_mode; then
     expected_owner="$(id -un)"
     expected_group="$(id -gn)"
   fi
-  actual="$(stat -c '%U:%G' "$path")"
+  actual="$(stat -c '%U:%G' "$path_value")"
   [[ "$actual" == "$expected_owner:$expected_group" ]] || \
-    die "Unexpected ownership for $path: $actual (expected $expected_owner:$expected_group)"
+    die "Unexpected ownership for $path_value: $actual (expected $expected_owner:$expected_group)"
 }
 
 verify_dir_security() {
-  local path="$1" mode="$2" owner="$3" group="$4"
-  [[ -d "$path" ]] || die "Required directory is missing: $path"
-  verify_mode "$path" "$mode"
-  verify_owner_group "$path" "$owner" "$group"
+  local path_value="$1"
+  local mode="$2"
+  local owner="$3"
+  local group="$4"
+  [[ -d "$path_value" ]] || die "Required directory is missing: $path_value"
+  verify_mode "$path_value" "$mode"
+  verify_owner_group "$path_value" "$owner" "$group"
 }
 
 verify_file_security() {
-  local path="$1" mode="$2" owner="$3" group="$4"
-  [[ -f "$path" ]] || die "Required file is missing: $path"
-  verify_mode "$path" "$mode"
-  verify_owner_group "$path" "$owner" "$group"
+  local path_value="$1"
+  local mode="$2"
+  local owner="$3"
+  local group="$4"
+  [[ -f "$path_value" ]] || die "Required file is missing: $path_value"
+  verify_mode "$path_value" "$mode"
+  verify_owner_group "$path_value" "$owner" "$group"
 }
 
 acquire_deploy_lock() {
@@ -150,7 +168,9 @@ acquire_deploy_lock() {
 }
 
 resolve_current_release() {
-  local app_root="$1" link="$app_root/current" target
+  local app_root="$1"
+  local link="$app_root/current"
+  local target
   if [[ ! -e "$link" && ! -L "$link" ]]; then
     return 1
   fi
@@ -162,23 +182,26 @@ resolve_current_release() {
 }
 
 remove_stale_transition_link() {
-  local path="$1"
-  if [[ -L "$path" ]]; then
-    rm -f -- "$path"
-  elif [[ -e "$path" ]]; then
-    die "Refusing to replace non-symlink transition path: $path"
+  local path_value="$1"
+  if [[ -L "$path_value" ]]; then
+    rm -f -- "$path_value"
+  elif [[ -e "$path_value" ]]; then
+    die "Refusing to replace non-symlink transition path: $path_value"
   fi
 }
 
 atomic_switch_link() {
-  local target="$1" link="$2" tmp="${link}.new.$$"
+  local target="$1"
+  local link="$2"
+  local tmp="${link}.new.$$"
   remove_stale_transition_link "$tmp"
   ln -s "$target" "$tmp"
   mv -Tf "$tmp" "$link"
 }
 
 run_healthcheck() {
-  local release_dir="$1" data_file="$2"
+  local release_dir="$1"
+  local data_file="$2"
   if [[ -n "${DEPLOY_HEALTHCHECK_HELPER:-}" ]]; then
     is_test_mode || die "DEPLOY_HEALTHCHECK_HELPER is allowed only in DEPLOY_TEST_MODE=1."
     "$DEPLOY_HEALTHCHECK_HELPER" "$release_dir" "$data_file"
@@ -188,7 +211,9 @@ run_healthcheck() {
 }
 
 wait_for_readiness() {
-  local release_dir="$1" data_file="$2" attempt
+  local release_dir="$1"
+  local data_file="$2"
+  local attempt
   for ((attempt = 1; attempt <= READINESS_ATTEMPTS; attempt += 1)); do
     if run_healthcheck "$release_dir" "$data_file" >/dev/null 2>&1; then
       return 0
@@ -207,7 +232,8 @@ service_is_active() {
 }
 
 validate_env_file() {
-  local release_dir="$1" env_file="$2"
+  local release_dir="$1"
+  local env_file="$2"
   (
     cd "$release_dir"
     DOTENV_CONFIG_PATH="$env_file" node -r dotenv/config -e '
