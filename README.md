@@ -4,10 +4,11 @@ A modular Discord bot for FiveM communities with Twitch/Kick stream notification
 
 ## Requirements
 
-- Node.js **18.17+** (Node 20/22 recommended)
+- Node.js **22+**
 - npm with the committed `package-lock.json`
 - A Discord application and bot token
-- Linux + systemd for the production deployment scripts
+- Linux with **systemd** for the supported production deployment scripts
+- Root access for production install/update/restore/uninstall operations
 
 The runtime requests these Discord privileged intents and they must be enabled on the **Developer Portal → Bot** page:
 
@@ -64,12 +65,15 @@ The first successful run creates `data.json`. Runtime configuration is then pers
 ## Verification
 
 ```bash
-npm run check:syntax
-npm test
+npm ci
 npm audit --audit-level=high
+npm run lint
+npm test
+npm run verify
+npm run check:syntax
 ```
 
-The test suite covers persistence concurrency/corruption, legacy migration, configuration validation, pathological regex rejection, process lifecycle, readiness, and backup/restore behavior.
+The test suite covers configuration validation, Discord permission failure paths, ticket recovery, persistence corruption and stress, process lifecycle, installer/update transactions, systemd policy, readiness, and backup/restore rollback behavior.
 
 ## Configuration
 
@@ -111,7 +115,7 @@ The test suite covers persistence concurrency/corruption, legacy migration, conf
 | `DATA_FILE` | Optional absolute database path; overrides `DATA_DIR` |
 | `TZ` | Optional process timezone used for configured FiveM restart clock times |
 
-`data.json` is written through a serialized atomic writer. Before replacing an existing database, the previous valid file is copied to `data.json.bak` and parsed for verification. Corrupt JSON fails closed and is **not** replaced by an empty database.
+`data.json` is written through a bounded/coalescing serialized atomic writer. Burst mutations share a small write backlog rather than creating an unbounded promise chain. Before replacing an existing database, the previous valid file is copied to `data.json.bak` and parsed for verification. The temporary file is fsynced before rename. Corrupt JSON fails closed and is **not** replaced by an empty database.
 
 ## Features and commands
 
@@ -139,7 +143,7 @@ Use `/setup wizard` for the notifier configuration. Legacy prefix operations rem
 /fivem show
 ```
 
-FiveM endpoints must return JSON with recognizable FiveM structure. Generic HTTP 200 pages are not treated as an online server.
+FiveM endpoints must return JSON with recognizable FiveM structure. Generic HTTP 200 pages are not treated as an online server. Scheduled-event state is committed only after Discord confirms event creation and persistence succeeds.
 
 ### Tickets
 
@@ -164,7 +168,7 @@ Tickets support multiple types. Current configuration commands are:
 /tickets show
 ```
 
-Ticket channels are created private from the first Discord API request. Creation fails if the bot cannot safely apply permission overwrites. Concurrent creation for the same user/type is serialized, and persistent ticket state is reconciled with Discord after restart.
+Ticket channels are private from the first Discord API request. Creation fails before channel creation if required permissions or configured staff-role hierarchy are unsafe. If permission setup or persistence fails after creation, the temporary channel is removed; if Discord also rejects cleanup, the still-private channel is tracked as `recovery_required` so startup reconciliation can clean it deterministically. Concurrent creation for the same user/type is serialized.
 
 ### Welcome / anti-raid / stats
 
@@ -191,7 +195,7 @@ Button URLs must use HTTP/HTTPS. Anti-raid only reports a kick after Discord con
 
 ## Production deployment (systemd)
 
-The supported production layout keeps releases separate from persistent state:
+The supported production layout keeps immutable releases, configuration, persistent state and verified backups separate:
 
 ```text
 /opt/fivem-discord-manager-bot/releases/...   immutable application releases
@@ -201,55 +205,90 @@ The supported production layout keeps releases separate from persistent state:
 /var/backups/fivem-discord-manager-bot/       verified backups
 ```
 
+The production scripts intentionally reject unsupported non-Linux/non-systemd environments and require Node.js 22+.
+
+### First installation
+
 From a trusted checkout:
 
 ```bash
-sudo ./scripts/install.sh
+sudo bash scripts/install.sh
 ```
 
-On the first run, the installer creates `/etc/fivem-discord-manager-bot/bot.env` and exits so you can fill the real token. Then run it again. The installer:
+On a fresh host, the first invocation creates `/etc/fivem-discord-manager-bot/bot.env` with mode `0640` and exits with status `2` **before switching any release**. Fill the real credentials without placing them in shell history:
 
-1. validates Node/npm/systemd prerequisites,
-2. installs with `npm ci --omit=dev`,
-3. installs the version-controlled hardened systemd unit,
-4. enables reboot startup,
-5. starts the service,
-6. waits for `scripts/healthcheck.js` to confirm a real runtime tick.
+```bash
+sudoedit /etc/fivem-discord-manager-bot/bot.env
+```
+
+Then rerun:
+
+```bash
+sudo bash scripts/install.sh
+```
+
+A successful installation:
+
+1. checks root, Linux/systemd, Node/npm and required tools,
+2. creates or validates the dedicated `fivembot` account/group,
+3. verifies directory and secret-file permissions,
+4. removes orphan `.staging-*` directories left by an interrupted installer after acquiring the deployment lock,
+5. creates a verified pre-install backup when replacing an existing managed install,
+6. stages a new immutable release and runs `npm ci --omit=dev --ignore-scripts`, syntax/config/unit validation,
+7. validates the version-controlled systemd unit,
+8. atomically switches `current`,
+9. restarts the service and waits for readiness,
+10. creates the managed-install sentinel only after success.
+
+If a failure occurs after transaction start, the installer restores the previous symlink and systemd unit, restores the prior active/inactive service state, and removes the failed release. A readiness failure is an installation failure.
+
+Expected permissions in production:
+
+```text
+/etc/fivem-discord-manager-bot/bot.env        root:fivembot 0640
+/var/lib/fivem-discord-manager-bot            fivembot:fivembot 0700
+/var/lib/fivem-discord-manager-bot/data.json  fivembot:fivembot 0600
+/var/backups/fivem-discord-manager-bot         root:root 0700
+```
 
 Useful commands:
 
 ```bash
-systemctl status fivem-discord-manager-bot
-journalctl -u fivem-discord-manager-bot -f
-DATA_FILE=/var/lib/fivem-discord-manager-bot/data.json node /opt/fivem-discord-manager-bot/current/scripts/healthcheck.js
+sudo systemctl status fivem-discord-manager-bot --no-pager -l
+sudo journalctl -u fivem-discord-manager-bot -f
+sudo -u fivembot env DATA_FILE=/var/lib/fivem-discord-manager-bot/data.json \
+  node /opt/fivem-discord-manager-bot/current/scripts/healthcheck.js
 ```
 
-The unit runs as dedicated user `fivembot`, uses `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=true`, a restrictive `UMask`, and only grants write access to the data directory.
+The unit uses `network-online.target`, a dedicated unprivileged account, `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=true`, private devices/tmp, a restrictive `UMask`, an empty capability set, and write access limited to the state directory.
 
 ## Backup and restore
 
 Create and verify a backup:
 
 ```bash
-sudo DATA_FILE=/var/lib/fivem-discord-manager-bot/data.json ./scripts/backup.sh
+sudo DATA_FILE=/var/lib/fivem-discord-manager-bot/data.json \
+  BACKUP_DIR=/var/backups/fivem-discord-manager-bot \
+  bash /opt/fivem-discord-manager-bot/current/scripts/backup.sh
 ```
 
-Backups are stored outside the release tree and get a SHA-256 sidecar.
+Backup filenames use `mktemp` entropy in addition to a UTC timestamp, so rapid successive backups cannot overwrite one another. Each backup is JSON-validated, fsynced, mode `0600`, and accompanied by a SHA-256 sidecar outside the release tree.
 
 Restore:
 
 ```bash
-sudo ./scripts/restore.sh /var/backups/fivem-discord-manager-bot/data-YYYYMMDDTHHMMSSZ.json
+sudo bash /opt/fivem-discord-manager-bot/current/scripts/restore.sh \
+  /var/backups/fivem-discord-manager-bot/data-<timestamp>-<random>.json
 ```
 
-Restore validates JSON/checksum, backs up current state first, stops the service if installed, performs an atomic replacement, then restarts it.
+Restore takes the shared deployment lock, verifies checksum and JSON **before** touching live data, stops an active service before taking the safety snapshot, creates a verified pre-restore backup, atomically replaces data, restores mode/ownership, restarts, and waits for readiness. If post-swap validation/readiness fails, the safety backup is restored. A failed restore never intentionally treats the replacement as success.
 
 ## Update and rollback
 
 Prepare a trusted checkout of the target version and run:
 
 ```bash
-sudo SOURCE_DIR=/path/to/new/checkout ./scripts/update.sh
+sudo SOURCE_DIR=/path/to/new/checkout bash /path/to/new/checkout/scripts/update.sh
 ```
 
 Updater behavior:
@@ -257,42 +296,56 @@ Updater behavior:
 ```text
 atomic flock
 → validate managed installation
+→ hash current data
 → verified external data backup
-→ install a new immutable release with npm ci
-→ switch current symlink
+→ stage/install new release
+→ atomic symlink switch
 → restart
 → readiness check
+→ validate persistence
 ```
 
-If installation/readiness fails, the updater restores the previous release symlink and restarts it. Persistent state is outside the release directory, and the pre-update data backup remains available for explicit restore.
+Only one install/update/restore transaction can own the deployment lock. A stale lock **file** does not block a later update because lock ownership is held by the kernel with `flock`.
+
+If the new release fails before the switch (for example `npm ci` fails), the old release remains active. If failure happens after the switch/readiness attempt, installer rollback restores the prior code/unit; the updater additionally compares the live data hash and restores the verified pre-update backup if the failed release changed persistent state. The previous release must pass readiness before rollback is considered healthy.
 
 ## Uninstall
 
-Default uninstall preserves data:
+Default uninstall preserves data and the service account:
 
 ```bash
-sudo ./scripts/uninstall.sh
+sudo bash /opt/fivem-discord-manager-bot/current/scripts/uninstall.sh
 ```
 
-To explicitly remove `/var/lib/fivem-discord-manager-bot` too:
+To explicitly remove `/var/lib/fivem-discord-manager-bot` and the dedicated account too:
 
 ```bash
-sudo ./scripts/uninstall.sh --purge-data
+sudo bash /opt/fivem-discord-manager-bot/current/scripts/uninstall.sh --purge-data
 ```
 
-The uninstaller requires exact expected paths and refuses arbitrary install/data/config paths. External backups are intentionally preserved.
+The uninstaller requires exact production paths plus a valid `/opt/fivem-discord-manager-bot/.managed-install` sentinel. It refuses arbitrary/shared paths. External backups are intentionally preserved.
 
 ## Recovery and troubleshooting
 
 ### Bot exits immediately
 
-Check:
-
 ```bash
-journalctl -u fivem-discord-manager-bot -n 100 --no-pager
+sudo journalctl -u fivem-discord-manager-bot -n 100 --no-pager
 ```
 
 Configuration errors are fail-fast. Invalid booleans, intervals, snowflakes, placeholder IDs and unsafe regexes produce explicit startup errors.
+
+### Production install fails readiness
+
+The installer returns a non-zero status and attempts to restore the previous managed release. Inspect:
+
+```bash
+readlink -f /opt/fivem-discord-manager-bot/current
+sudo systemctl status fivem-discord-manager-bot --no-pager -l
+sudo journalctl -u fivem-discord-manager-bot -n 200 --no-pager
+```
+
+Do not delete `/var/lib/fivem-discord-manager-bot` while diagnosing an update or restore failure.
 
 ### Slash commands do not appear
 
@@ -305,7 +358,7 @@ Use `DISCORD_GUILD_ID` during development and ensure the bot invite includes `bo
 
 ### Tickets fail to create
 
-Verify **Manage Channels + Manage Roles** and role hierarchy. A ticket is not accepted unless private permission overwrites can be applied.
+Verify **Manage Channels + Manage Roles** and that every configured staff role is below the bot's highest role. Unsafe hierarchy/permission state fails closed; it does not intentionally create a public fallback channel.
 
 ### Server stats do not update
 
@@ -317,11 +370,28 @@ Configure a status channel and restart times, enable scheduled events, and grant
 
 ## CI
 
-GitHub Actions runs clean `npm ci`, syntax checks, the Node test suite, and `npm audit --audit-level=high` across supported Node versions. Shell deployment scripts are also syntax/ShellCheck candidates in CI.
+The version-controlled CI is read-only and gates pull requests on:
+
+```text
+npm ci
+npm audit --audit-level=high
+npm run lint
+npm test
+npm run verify
+npm run check:syntax
+ShellCheck
+systemd-analyze verify
+deployment/backup/restore/systemd tests
+persistence stress tests
+git diff --check
+clean git status
+```
+
+CI covers Node.js 22 and 24. A green CI run is an internal Source/Repository gate; a real Ubuntu/systemd + Discord smoke test is still required before declaring a release Production Ready.
 
 ## Security
 
-Never commit `.env`, `data.json`, tokens, backups, or runtime logs. See [SECURITY.md](SECURITY.md) for reporting policy.
+Never commit `.env`, `data.json`, tokens, backups, runtime logs, temporary persistence files, or generated deployment state. See [SECURITY.md](SECURITY.md) for reporting policy.
 
 ## License
 
