@@ -16,6 +16,7 @@ async function createDeployHarness({ existing = false } = {}) {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), "fivem-deploy-"));
   const appRoot = path.join(base, "opt", "fivem-discord-manager-bot");
   const dataDir = path.join(base, "var", "lib", "fivem-discord-manager-bot");
+  const dataFile = path.join(dataDir, "data.json");
   const configDir = path.join(base, "etc", "fivem-discord-manager-bot");
   const backupDir = path.join(base, "var", "backups", "fivem-discord-manager-bot");
   const systemdDir = path.join(base, "etc", "systemd", "system");
@@ -40,6 +41,7 @@ async function createDeployHarness({ existing = false } = {}) {
   ]) {
     await fs.mkdir(dir, { recursive: true });
   }
+  await fs.chmod(appRoot, 0o755);
   await fs.chmod(path.join(appRoot, "releases"), 0o755);
   await fs.chmod(dataDir, 0o700);
   await fs.chmod(configDir, 0o750);
@@ -151,9 +153,11 @@ exit 0
     SOURCE_DIR: root,
     APP_ROOT: appRoot,
     DATA_DIR: dataDir,
+    DATA_FILE: dataFile,
     CONFIG_DIR: configDir,
     BACKUP_DIR: backupDir,
     SERVICE_FILE: serviceFile,
+    SERVICE_NAME: "fivem-discord-manager-bot",
     DEPLOY_LOCK_FILE: lockFile,
     DEPLOY_HEALTHCHECK_HELPER: healthHelper,
     READINESS_ATTEMPTS: "2",
@@ -175,11 +179,11 @@ exit 0
     await fs.chmod(serviceFile, 0o644);
     await fs.writeFile(activeFile, "active\n", "utf8");
     await fs.writeFile(
-      path.join(dataDir, "data.json"),
+      dataFile,
       JSON.stringify({ schemaVersion: 1, marker, state: { lastTickAt: 1 } }) + "\n",
       "utf8"
     );
-    await fs.chmod(path.join(dataDir, "data.json"), 0o600);
+    await fs.chmod(dataFile, 0o600);
     await fs.writeFile(path.join(appRoot, ".managed-install"), "fivem-discord-manager-bot\n", "utf8");
     await fs.chmod(path.join(appRoot, ".managed-install"), 0o600);
     return oldRelease;
@@ -208,7 +212,7 @@ exit 0
   }
 
   async function readData() {
-    return JSON.parse(await fs.readFile(path.join(dataDir, "data.json"), "utf8"));
+    return JSON.parse(await fs.readFile(dataFile, "utf8"));
   }
 
   async function backups() {
@@ -225,6 +229,7 @@ exit 0
     base,
     appRoot,
     dataDir,
+    dataFile,
     configDir,
     backupDir,
     serviceFile,
