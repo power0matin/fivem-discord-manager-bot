@@ -1,472 +1,328 @@
 # FiveM Discord Manager Bot
 
-<p align="center">
-  <a href="#"><img src="https://badges.strrl.dev/visits/power0matin/fivem-discord-manager-bot?style=flat&labelColor=333333&logoColor=E7E7E7&label=Visits&logo=github" alt="Visits badge" /></a>
-  <a href="#"><img src="https://img.shields.io/github/stars/power0matin/fivem-discord-manager-bot?style=flat&labelColor=333333&logoColor=E7E7E7&color=EEAA00&label=Stars&logo=github" alt="Stars badge" /></a>
-  <a href="#"><img src="https://img.shields.io/github/repo-size/power0matin/fivem-discord-manager-bot?style=flat&labelColor=333333&logoColor=E7E7E7&color=007BFF&label=Repo%20Size&logo=github" alt="Repo size badge" /></a>
-</p>
+A modular Discord bot for FiveM communities with Twitch/Kick stream notifications, FiveM server status, private support tickets, welcome/goodbye automation, anti-raid protection, roles, server statistics, and restart events.
 
-<p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen"/></a>
-  <a href="#"><img src="https://img.shields.io/badge/discord.js-v14-5865F2"/></a>
-  <a href="#"><img src="https://img.shields.io/badge/License-MIT-yellow.svg"/></a>
-  <a href="#"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg"/></a>
-</p>
+## Requirements
 
-A **modular Discord bot** for **FiveM communities**.
+- Node.js **18.17+** (Node 20/22 recommended)
+- npm with the committed `package-lock.json`
+- A Discord application and bot token
+- Linux + systemd for the production deployment scripts
 
-It currently ships with:
+The runtime requests these Discord privileged intents and they must be enabled on the **Developer Portal → Bot** page:
 
-- **Stream Notifier** (Twitch + Kick alerts with filters)
-- **FiveM Server Status** (auto-updating status card with players, restart ETA, optional server uptime, buttons, voice channel status, and scheduled events)
-- **Tickets** (panel + private ticket channels + close workflow)
-- **Welcome** (clean welcome message with banner image, buttons + user avatar thumbnail)
+- **Message Content Intent** — prefix commands / optional ticket text commands
+- **Server Members Intent** — welcome, member lookup, role management
+- **Presence Intent** — `{online}` server-stat placeholder
 
-Designed for reliability, rate-limit safety, and clean UX.
+Recommended bot permissions depend on enabled modules:
 
-## Table of Contents
+- Baseline: View Channels, Send Messages, Embed Links, Read Message History
+- Tickets: **Manage Channels + Manage Roles** (required for private overwrites), Manage Messages
+- Stream live role / welcome auto-role: Manage Roles and correct role hierarchy
+- Anti-raid: **Kick Members**
+- Ticket voice move: Move Members
+- Stream notification cleanup: Manage Messages
+- `@here`: Mention Everyone
+- Voice status/stat channels: Manage Channels
+- Scheduled restart events: Manage Events
 
-- [Modules](#modules)
-- [Quick Start](#quick-start)
-- [Slash Commands](#slash-commands)
-- [Configuration](#configuration)
-- [Data & Storage](#data--storage)
-- [Permissions & Intents](#permissions--intents)
-- [Deploy](#deploy)
-- [Troubleshooting](#troubleshooting)
-- [Roadmap](#roadmap)
-- [Contributing](#contributing)
-- [Security](#security)
-- [License](#license)
-
-## Modules
-
-### 1) Stream Notifier (Twitch + Kick)
-
-Monitors Twitch and Kick streams and posts **LIVE alerts + links** when streams match:
-
-- **Game/Category** (default GTA V; configurable)
-- **Title keyword/regex** (default: `nox\s*[-_]*\s*rp`)
-
-Key behaviors:
-
-- One-message lifecycle per streamer (LIVE -> create once, still LIVE -> no spam, OFFLINE -> delete)
-- Optional `@here` mention (toggleable)
-- Optional stored Discord mention per streamer
-- Persistent state and health/backoff status
-- Kick-priority: when streamer is live on both platforms, only Kick notification is sent
-
-### 2) FiveM Status
-
-Auto-posts (or edits) a single **status card** message in a configured channel.
-
-What it shows:
-
-- Online/offline (with blocked endpoint detection: `"Nope."`)
-- Players count (+ optional players list, safe/truncated)
-- **F8 connect command** (configurable)
-- **Next restart ETA** (based on daily restart times you set)
-- **Uptime (STRICT)**: shown **only if the FiveM server explicitly publishes uptime**
-  - If the server does not expose uptime via `/dynamic.json` or `/info.json` (including `vars`), the embed shows `--`
-  - This prevents showing bot-observed uptime (which is often misleading)
-
-Buttons / UX:
-
-- **Website button** (http/https link button)
-- **Connect button**
-  - If `connectUrl` is **http/https** -> Discord link button
-  - If `connectUrl` is **fivem://...** -> custom button that replies ephemerally with connect instructions + the link
-
-New features:
-
-- **Channel Voice Status** (`/fivem set-voice-status`): Shows server online/offline status in a voice channel name (e.g., "🟢 Server Online")
-- **Scheduled Events** (`/fivem set-scheduled-events`): Auto-creates Discord Scheduled Events for upcoming server restarts
-
-Data sources (FiveM endpoints):
-
-- `/dynamic.json` (primary signal in most setups)
-- `/info.json`
-- `/players.json`
-
-Reliability behaviors:
-
-- Edits a single message in-place (no channel spam)
-- Failure backoff to avoid hammering on transient outages
-
-### 3) Tickets
-
-Ticket system designed for FiveM communities:
-
-- Create/update **ticket panel** message with a button
-- Private ticket channels under a category
-- Staff role access
-- Close workflow with confirm/cancel
-- Optional log channel
-- Multi-type support (each type -> separate category + button)
-- Transcript export on close
-
-### 4) Welcome
-
-Welcome module sends a clean message when someone joins.
-
-**Important UX requirement (implemented):**
-
-- Mention is NOT inside the embed
-- The message content is ONLY: `||@mention||`
-- Under it, an embed is posted with:
-  - Thumbnail = user avatar
-  - Optional banner image
-  - Title + description (no mention)
-  - Two link buttons (e.g., Rules, Website)
-  - Custom embed color
-
-Additional features:
-
-- **Anti-raid protection**: Rate-limit new member joins; kicks suspicious accounts automatically
-- **Goodbye message**: Send an embed when members leave
-- **Server stats**: Display member count in a voice channel name (e.g., "Members: 1,234")
-- **Log channel**: Anti-raid alerts sent to a configured channel
-
-## Quick Start
-
-### Prerequisites
-
-- Node.js **18+**
-- A Discord application/bot:
-  - **Bot Token**
-  - **Application ID (Client ID)**
-
-Optional (only if you want the Stream Notifier module fully working):
-
-- Twitch Developer App: `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`
-- Kick credentials: `KICK_CLIENT_ID`, `KICK_CLIENT_SECRET`
-
-### Install
+## Clean install (development/manual)
 
 ```bash
 git clone https://github.com/power0matin/fivem-discord-manager-bot.git
 cd fivem-discord-manager-bot
-
-npm install
+npm ci
 cp .env.example .env
 ```
 
-### Register Slash Commands (recommended for fast iteration)
+Fill at least:
+
+```env
+DISCORD_TOKEN=...
+DISCORD_CLIENT_ID=...
+```
+
+Optional IDs and platform credentials in `.env.example` are intentionally blank. Do not leave placeholder IDs or fake credentials.
+
+Register slash commands:
 
 ```bash
 npm run slash:register
 ```
 
-Tip: Set `DISCORD_GUILD_ID` in `.env` to register commands to a single guild instantly.
+For development, set `DISCORD_GUILD_ID` so commands appear in one guild immediately.
 
-### Run
+Start:
 
 ```bash
-npm run start
+npm start
 ```
 
-On first run, the bot will create `data.json` and use `.env` to seed defaults.
+The first successful run creates `data.json`. Runtime configuration is then persisted there; `.env` supplies secrets and first-run defaults unless `ENV_OVERRIDES_DB=true`.
 
-## Slash Commands
+## Verification
 
-### `/setup` (Stream Notifier)
+```bash
+npm run check:syntax
+npm test
+npm audit --audit-level=high
+```
 
-Interactive wizard for Stream Notifier module:
-
-- notify channel
-- `@here`
-- regex filter
-- scan interval
-- discovery options (optional)
-
-### `/fivem`
-
-FiveM server status & auto updater:
-
-Core:
-
-- `/fivem set-endpoint url:http://127.0.0.1:30120`
-- `/fivem set-channel channel:#status`
-- `/fivem set-interval seconds:300`
-- `/fivem toggle enabled:true`
-- `/fivem status`
-- `/fivem show`
-
-UI / Card:
-
-- `/fivem set-title title:"Nox RP v3.1"`
-- `/fivem set-description text:"Short tagline here..."`
-- `/fivem set-banner url:"https://..."` or `/fivem set-banner clear:true`
-
-Buttons / Connect UX:
-
-- `/fivem set-website url:"https://example.com" label:"Website"`
-- `/fivem set-connect url:"fivem://connect/your.host"` or `url:"https://..."` + `label:"Connect"`
-- `/fivem set-connect-command command:"connect your.host"`
-
-Restart schedule:
-
-- `/fivem set-restart-times times:"05:00,17:00"` or `/fivem set-restart-times clear:true`
-
-Voice status:
-
-- `/fivem set-voice-status channel:#voice-channel` or `/fivem set-voice-status clear:true`
-
-Scheduled events:
-
-- `/fivem set-scheduled-events enabled:true` or `/fivem set-scheduled-events enabled:false`
-
-### `/tickets`
-
-Ticket system management:
-
-- `/tickets toggle enabled:true`
-- `/tickets set-category category:<category>`
-- `/tickets staff-add role:<role>`
-- `/tickets set-log-channel channel:<channel>`
-- `/tickets panel channel:<channel> [title] [description]`
-- `/tickets close` (inside ticket channel)
-- `/tickets show`
-
-### `/welcome`
-
-Welcome system:
-
-- `/welcome toggle enabled:true`
-- `/welcome set-channel channel:#welcome`
-- `/welcome set-title title:"Welcome to the NOX Community!"`
-- `/welcome set-message template:"Welcome to the NOX Community! We are glad to have you."`
-- `/welcome set-buttons label1:"Rules" url1:"https://..." label2:"Website" url2:"https://..."`
-- `/welcome set-color color:"#57F287"` or `/welcome set-color clear:true`
-- `/welcome set-banner url:"https://..."` or `/welcome set-banner clear:true`
-- `/welcome set-dm enabled:true template:"Welcome to {server}!"`
-- `/welcome set-role role:@Member` or `/welcome set-role clear:true`
-- `/welcome test`
-- `/welcome show`
-
-Anti-raid:
-
-- `/welcome set-anti-raid enabled:true threshold:5`
-
-Goodbye:
-
-- `/welcome set-goodbye enabled:true channel:#goodbye`
-- `/welcome set-goodbye-message title:"Goodbye!" message:"See you next time, {user}!"`
-
-Server stats:
-
-- `/welcome set-stats channel:#stats format:"Members: {total}"`
-- `/welcome set-stats clear:true`
-
-Logging:
-
-- `/welcome set-log-channel channel:#logs`
+The test suite covers persistence concurrency/corruption, legacy migration, configuration validation, pathological regex rejection, process lifecycle, readiness, and backup/restore behavior.
 
 ## Configuration
 
-This bot uses:
+### Required runtime
 
-- `.env` for secrets and first-run defaults
-- `data.json` for persistent runtime config/state
+| Variable | Purpose |
+|---|---|
+| `DISCORD_TOKEN` | Discord bot token (secret) |
 
-After first run, **`data.json` is the source of truth** so you can configure via Discord commands without redeploying.
+### Slash registration
 
-### Required
+| Variable | Purpose |
+|---|---|
+| `DISCORD_CLIENT_ID` | Discord application ID |
+| `DISCORD_GUILD_ID` | Optional development guild ID |
 
-| Variable            | Description                |
-| ------------------- | -------------------------- |
-| `DISCORD_TOKEN`     | Discord bot token          |
-| `DISCORD_CLIENT_ID` | Application ID (Client ID) |
+### Runtime defaults / authorization
 
-### Optional (recommended)
+| Variable | Default | Purpose |
+|---|---:|---|
+| `DISCORD_NOTIFY_CHANNEL_ID` | empty | Stream notification channel default |
+| `PREFIX` | `.` | Legacy prefix |
+| `MENTION_HERE` | `true` | Allow notifier `@here` |
+| `KEYWORD_REGEX` | `nox\s*rp` | Stream title filter; unsafe nested-quantifier regexes are rejected |
+| `CHECK_INTERVAL_SECONDS` | `60` | Stream polling, 10..3600 |
+| `ENV_OVERRIDES_DB` | `false` | Force ENV defaults over persisted settings at startup |
+| `ALLOWED_ROLE_IDS` | empty | Comma-separated admin roles; empty falls back to Manage Server |
+| `STREAMER_LIVE_ROLE_ID` | empty | Optional live-streamer role |
 
-| Variable           | Description                                                                                       |
-| ------------------ | ------------------------------------------------------------------------------------------------- |
-| `DISCORD_GUILD_ID` | If set, registers slash commands to this guild (instant)                                          |
-| `ALLOWED_ROLE_IDS` | Comma-separated role IDs allowed to use admin commands. If empty, falls back to **Manage Server** |
-| `DISCORD_NOTIFY_CHANNEL_ID` | Default notify channel (can be overridden via `/setup` wizard) |
+### Discovery / platform credentials
 
-### Stream Notifier (optional per platform)
+`TWITCH_CLIENT_ID` + `TWITCH_CLIENT_SECRET` enable Twitch. `KICK_CLIENT_ID` + `KICK_CLIENT_SECRET` enable Kick. Leaving them blank disables that platform cleanly.
 
-| Variable               | Description      |
-| ---------------------- | ---------------- |
-| `TWITCH_CLIENT_ID`     | Twitch client id |
-| `TWITCH_CLIENT_SECRET` | Twitch secret    |
-| `KICK_CLIENT_ID`       | Kick client id   |
-| `KICK_CLIENT_SECRET`   | Kick secret      |
+### Persistence
 
-### FiveM Status (optional)
+| Variable | Purpose |
+|---|---|
+| `DATA_DIR` | Optional data directory; default is current working directory |
+| `DATA_FILE` | Optional absolute database path; overrides `DATA_DIR` |
+| `TZ` | Optional process timezone used for configured FiveM restart clock times |
 
-| Variable                            | Description                                        |
-| ----------------------------------- | -------------------------------------------------- |
-| `FIVEM_VOICE_STATUS_CHANNEL_ID`     | Voice channel to show server status in name        |
-| `FIVEM_ENABLE_SCHEDULED_EVENTS`     | Auto-create Discord events for restarts            |
+`data.json` is written through a serialized atomic writer. Before replacing an existing database, the previous valid file is copied to `data.json.bak` and parsed for verification. Corrupt JSON fails closed and is **not** replaced by an empty database.
 
-## Data & Storage
+## Features and commands
 
-`data.json` stores:
+### Stream notifier
 
-- Stream Notifier settings + streamer lists
-- FiveM status card settings (buttons, restart schedule, embed theme, voice status, scheduled events) + module backoff/health state
-- Tickets settings + open ticket mappings
-- Welcome settings (templates/buttons/roles/banner)
-- Message IDs for edit-in-place behavior (FiveM status / Stream alerts)
+Use `/setup wizard` for the notifier configuration. Legacy prefix operations remain available (`.config`, `.health`, `.tick`, `.k ...`, `.t ...`). Twitch/Kick calls use request timeouts and runtime backoff.
 
-`data.json` is intentionally gitignored.
+### FiveM
 
-## Permissions & Intents
-
-### Discord intents
-
-- **Message Content Intent**: required if you use prefix commands (legacy stream-notifier features)
-- **Server Members Intent**: recommended for welcome/roles and any role assignment features
-
-### Required permissions (recommended baseline)
-
-- View Channel
-- Send Messages
-- Embed Links
-- Read Message History
-
-Module-specific:
-
-- **Tickets**: Manage Channels, Manage Messages (delete/close), View Channels
-- **Stream Notifier**: Manage Messages (delete live alert on offline), Mention Everyone (if using `@here`)
-- **Welcome**: Send Messages, Embed Links, (optional) Manage Roles (auto-role)
-- **FiveM Status**: Manage Channels (voice status rename), Manage Events (scheduled events)
-
-## Deploy
-
-### Option A: PM2 (recommended)
-
-```bash
-npm i -g pm2
-
-# slash commands (run when commands change)
-npm run slash:register
-
-pm2 start src/index.js --name fivem-discord-manager-bot
-pm2 save
-pm2 startup
+```text
+/fivem toggle
+/fivem set-endpoint
+/fivem set-channel
+/fivem set-interval
+/fivem set-title
+/fivem set-description
+/fivem set-banner
+/fivem set-website
+/fivem set-connect
+/fivem set-connect-command
+/fivem set-restart-times
+/fivem set-voice-status
+/fivem set-scheduled-events
+/fivem status
+/fivem show
 ```
 
-### Option B: Docker
+FiveM endpoints must return JSON with recognizable FiveM structure. Generic HTTP 200 pages are not treated as an online server.
 
-Not included yet. PRs welcome.
+### Tickets
 
-## Troubleshooting
+Tickets support multiple types. Current configuration commands are:
+
+```text
+/tickets toggle
+/tickets set-log-channel
+/tickets clear-log-channel
+/tickets panel
+/tickets type-add
+/tickets type-remove
+/tickets type-list
+/tickets type-set-category
+/tickets type-staff-role
+/tickets type-mention-role
+/tickets type-set-voice
+/tickets claim
+/tickets assign
+/tickets unassign
+/tickets close
+/tickets show
+```
+
+Ticket channels are created private from the first Discord API request. Creation fails if the bot cannot safely apply permission overwrites. Concurrent creation for the same user/type is serialized, and persistent ticket state is reconciled with Discord after restart.
+
+### Welcome / anti-raid / stats
+
+```text
+/welcome toggle
+/welcome set-channel
+/welcome set-title
+/welcome set-message
+/welcome set-buttons
+/welcome set-color
+/welcome set-banner
+/welcome set-dm
+/welcome set-role
+/welcome set-anti-raid
+/welcome set-goodbye
+/welcome set-goodbye-message
+/welcome set-stats
+/welcome set-log-channel
+/welcome test
+/welcome show
+```
+
+Button URLs must use HTTP/HTTPS. Anti-raid only reports a kick after Discord confirms it. `{online}` requires Presence Intent.
+
+## Production deployment (systemd)
+
+The supported production layout keeps releases separate from persistent state:
+
+```text
+/opt/fivem-discord-manager-bot/releases/...   immutable application releases
+/opt/fivem-discord-manager-bot/current        active release symlink
+/etc/fivem-discord-manager-bot/bot.env        secrets/config
+/var/lib/fivem-discord-manager-bot/data.json  persistent state
+/var/backups/fivem-discord-manager-bot/       verified backups
+```
+
+From a trusted checkout:
+
+```bash
+sudo ./scripts/install.sh
+```
+
+On the first run, the installer creates `/etc/fivem-discord-manager-bot/bot.env` and exits so you can fill the real token. Then run it again. The installer:
+
+1. validates Node/npm/systemd prerequisites,
+2. installs with `npm ci --omit=dev`,
+3. installs the version-controlled hardened systemd unit,
+4. enables reboot startup,
+5. starts the service,
+6. waits for `scripts/healthcheck.js` to confirm a real runtime tick.
+
+Useful commands:
+
+```bash
+systemctl status fivem-discord-manager-bot
+journalctl -u fivem-discord-manager-bot -f
+DATA_FILE=/var/lib/fivem-discord-manager-bot/data.json node /opt/fivem-discord-manager-bot/current/scripts/healthcheck.js
+```
+
+The unit runs as dedicated user `fivembot`, uses `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=true`, a restrictive `UMask`, and only grants write access to the data directory.
+
+## Backup and restore
+
+Create and verify a backup:
+
+```bash
+sudo DATA_FILE=/var/lib/fivem-discord-manager-bot/data.json ./scripts/backup.sh
+```
+
+Backups are stored outside the release tree and get a SHA-256 sidecar.
+
+Restore:
+
+```bash
+sudo ./scripts/restore.sh /var/backups/fivem-discord-manager-bot/data-YYYYMMDDTHHMMSSZ.json
+```
+
+Restore validates JSON/checksum, backs up current state first, stops the service if installed, performs an atomic replacement, then restarts it.
+
+## Update and rollback
+
+Prepare a trusted checkout of the target version and run:
+
+```bash
+sudo SOURCE_DIR=/path/to/new/checkout ./scripts/update.sh
+```
+
+Updater behavior:
+
+```text
+atomic flock
+→ validate managed installation
+→ verified external data backup
+→ install a new immutable release with npm ci
+→ switch current symlink
+→ restart
+→ readiness check
+```
+
+If installation/readiness fails, the updater restores the previous release symlink and restarts it. Persistent state is outside the release directory, and the pre-update data backup remains available for explicit restore.
+
+## Uninstall
+
+Default uninstall preserves data:
+
+```bash
+sudo ./scripts/uninstall.sh
+```
+
+To explicitly remove `/var/lib/fivem-discord-manager-bot` too:
+
+```bash
+sudo ./scripts/uninstall.sh --purge-data
+```
+
+The uninstaller requires exact expected paths and refuses arbitrary install/data/config paths. External backups are intentionally preserved.
+
+## Recovery and troubleshooting
+
+### Bot exits immediately
+
+Check:
+
+```bash
+journalctl -u fivem-discord-manager-bot -n 100 --no-pager
+```
+
+Configuration errors are fail-fast. Invalid booleans, intervals, snowflakes, placeholder IDs and unsafe regexes produce explicit startup errors.
 
 ### Slash commands do not appear
 
-1. Ensure you registered them:
-
 ```bash
-npm run slash:register
-```
-
-2. If using global deploy, wait (can take time). For development use guild deploy:
-
-- set `DISCORD_GUILD_ID` in `.env`
-
-3. Ensure bot invite includes:
-
-- scope: `applications.commands`
-- scope: `bot`
-
-Reset commands (safe recovery):
-
-```bash
-npm run slash:purge
-npm run slash:register
 npm run slash:list
+npm run slash:register
 ```
 
-### Welcome message has no buttons
+Use `DISCORD_GUILD_ID` during development and ensure the bot invite includes `bot` and `applications.commands` scopes.
 
-Buttons are link buttons; they require URLs to be set:
+### Tickets fail to create
 
-- `/welcome set-buttons ...`
-  or set them in `data.json` under `welcome.settings.buttons`.
+Verify **Manage Channels + Manage Roles** and role hierarchy. A ticket is not accepted unless private permission overwrites can be applied.
 
-### Tickets cannot create channels
+### Server stats do not update
 
-Ensure bot has:
+Verify the configured channel is a voice channel, the bot has Manage Channels, and Presence Intent is enabled if the format contains `{online}`.
 
-- Manage Channels
-- View Channels
-- Send Messages
-  Also ensure ticket category is a valid category.
+### FiveM scheduled events do not appear
 
-### FiveM uptime shows `--`
+Configure a status channel and restart times, enable scheduled events, and grant Manage Events.
 
-This is expected in **STRICT uptime mode**.
+## CI
 
-The bot only displays uptime if your FiveM server explicitly publishes it via `/dynamic.json` or `/info.json` (including `vars`).
-If your server does not expose an uptime variable/convar, the embed shows `--` to avoid misleading "bot uptime".
-
-Tip:
-
-- Expose a convar/variable like `uptimeSeconds` (or any key containing `uptime`) on the server side so it appears under `vars`.
-- Then the bot can parse and render it.
-
-### FiveM endpoints are blocked (shows Offline / "Nope.")
-
-If the bot reports that endpoints are blocked, your server (or a proxy/firewall) is likely returning `"Nope."` for:
-
-- `/dynamic.json`
-- `/info.json`
-- `/players.json`
-
-Ensure the bot host can reach your FiveM server port (default `30120`) and that these endpoints are not filtered.
-
-### Voice status channel not updating
-
-Ensure:
-
-- The channel is a **Voice Channel** (not text)
-- Bot has **Manage Channels** permission
-- `/fivem set-voice-status` is configured with a valid channel
-
-### Scheduled events not creating
-
-Ensure:
-
-- Restart times are configured (`/fivem set-restart-times`)
-- Bot has **Manage Events** permission
-- Enable with `/fivem set-scheduled-events enabled:true`
-
-## Roadmap
-
-- [ ] Multi-server configuration (per-guild data)
-- [ ] Docker support
-- [ ] Expand slash commands for Stream Notifier streamer management
-- [ ] More FiveM utilities (server rules sync, whitelist tools, moderation helpers)
-- [ ] Forum channel support for tickets
-
-## Contributing
-
-PRs are welcome.
-
-- Keep changes small and reviewable
-- Never commit `.env` or tokens
-- Update README if behavior changes
-
-See: [CONTRIBUTING.md](CONTRIBUTING.md)
+GitHub Actions runs clean `npm ci`, syntax checks, the Node test suite, and `npm audit --audit-level=high` across supported Node versions. Shell deployment scripts are also syntax/ShellCheck candidates in CI.
 
 ## Security
 
-If you discover a security issue, please do not open a public issue.
-See: [SECURITY.md](SECURITY.md)
+Never commit `.env`, `data.json`, tokens, backups, or runtime logs. See [SECURITY.md](SECURITY.md) for reporting policy.
 
 ## License
 
-MIT -- see [LICENSE](LICENSE)
-
-## Contact
-
-**Matin Shahabadi**
-
-- Website: [matinshahabadi.ir](https://matinshahabadi.ir)
-- Email: [me@matinshahabadi.ir](mailto:me@matinshahabadi.ir)
-- GitHub: [power0matin](https://github.com/power0matin)
-- LinkedIn: [matin-shahabadi](https://www.linkedin.com/in/matin-shahabadi)
+MIT — see [LICENSE](LICENSE).

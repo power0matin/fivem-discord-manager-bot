@@ -1,11 +1,21 @@
 # Dependencies
 node_modules/
 
-# Local env (Never commit secrets!)
+# Local environment / secrets
 .env
+.env.*
+!.env.example
 
-# Runtime data (lists & state)
+# Runtime data and atomic-write artifacts
 data.json
+data.json.bak
+data.json.tmp*
+*.restore.*
+
+# Local backups / archives
+backups/
+*.backup
+*.bak
 
 # Logs
 *.log
@@ -14,10 +24,12 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Coverage / generated output
+coverage/
+.nyc_output/
+
 # OS / Editors
 .DS_Store
 .vscode/
 .idea/
-
-# MiMoCode workspace
 .mimocode/

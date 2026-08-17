@@ -1,56 +1,61 @@
 # Security Policy
 
-## Reporting a Vulnerability
+## Supported versions
 
-If you find a security issue (token leak, auth bypass, etc.), please **do not** open a public issue.
-Instead, contact the maintainer privately and rotate the affected tokens immediately.
+| Version | Status |
+|---|---|
+| 2.1.x | Supported |
+| 2.0.x | Security fixes only |
+| 1.x | Unsupported |
 
-Contact: [me@matinshahabadi.ir](mailto:me@matinshahabadi.ir)
+## Reporting a vulnerability
 
-## Supported Versions
+Do not open a public issue for token leakage, permission bypasses, private-ticket disclosure, data corruption, or other security-sensitive findings. Contact the maintainer privately at `me@matinshahabadi.ir`. If a credential may have leaked, revoke/rotate it immediately; do not wait for a code fix.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 2.0.x   | Yes                |
-| 1.x.x   | No                 |
+## Security model
 
-## Security Best Practices
+Secrets belong in environment configuration, not `data.json` or source control. `.env`, runtime databases, atomic temporary files and local backups are ignored by Git.
 
-### Token Safety
+The production systemd unit runs as a dedicated unprivileged account with a read-only application tree. Persistent writes are restricted to `/var/lib/fivem-discord-manager-bot`.
 
-- Never commit `.env` or any secrets to version control.
-- Rotate Discord/Twitch/Kick tokens if you suspect a leak.
-- Use environment variables or a secrets manager in production.
+### Discord permissions
 
-### Bot Permissions
+Use least privilege, but do not omit permissions required to enforce a security boundary:
 
-Follow the principle of least privilege:
+- Tickets require **Manage Channels and Manage Roles** so private channel overwrites can be applied atomically. Ticket creation fails rather than creating a public fallback channel.
+- Anti-raid requires **Kick Members**. The bot only records a kick as successful after Discord confirms it.
+- Auto-role/live-role features require Manage Roles and correct role hierarchy.
+- Ticket voice move requires Move Members.
+- Scheduled restart events require Manage Events.
 
-- **Minimum required**: View Channel, Send Messages, Embed Links, Read Message History
-- **Tickets**: Add Manage Channels, Manage Messages
-- **Stream Notifier**: Add Manage Messages, Mention Everyone (if using @here)
-- **Welcome**: Add Manage Roles (if using auto-role)
-- **FiveM Status**: Add Manage Channels (voice status), Manage Events (scheduled events)
+### Privileged intents
 
-### Discord Intents
+The current runtime requests Message Content, Server Members and Presence intents. Enable all three in the Discord Developer Portal before production startup. Presence is used for the `{online}` server-stat placeholder.
 
-- **Message Content Intent**: Required for prefix commands. Not needed if using slash commands only.
-- **Server Members Intent**: Required for welcome auto-role and role management features.
+### Persistence
 
-### Data Storage
+`data.json` is operationally sensitive and may contain Discord IDs and runtime state. The persistence layer:
 
-- `data.json` stores runtime configuration and state. It is gitignored by default.
-- Never share `data.json` publicly -- it may contain channel IDs, message IDs, and operational state.
-- Back up `data.json` before major changes.
+- serializes concurrent writes,
+- writes to a unique mode-0600 temporary file,
+- fsyncs before replacement,
+- verifies a backup of the previous valid database,
+- fails closed on corrupt JSON instead of replacing it with defaults.
 
-### API Credentials
+Use `scripts/backup.sh` and `scripts/restore.sh` for verified operational backups. Backups are stored outside the release directory in the production layout.
 
-- Twitch and Kick credentials are used only for server-side API calls.
-- Tokens are never logged or exposed in embeds/messages.
-- Token refresh happens in-memory only; refreshed tokens are not persisted.
+### Dependencies
 
-## Dependency Security
+Pull requests must use the committed lockfile and CI must run:
 
-- Keep Node.js updated (18+ required).
-- Run `npm audit` periodically to check for vulnerable dependencies.
-- The bot uses minimal dependencies: `discord.js`, `axios`, `dotenv`.
+```bash
+npm ci
+npm run verify
+npm audit --audit-level=high
+```
+
+High/critical advisories are release blockers unless a documented reachability analysis and explicit maintainer decision says otherwise.
+
+### Logs
+
+Do not log raw Discord tokens, Twitch/Kick client secrets, OAuth access tokens, `.env` content, or backup file content. Error logs should include component/context without secret material.

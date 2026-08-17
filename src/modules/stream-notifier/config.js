@@ -1,74 +1,121 @@
+"use strict";
+
 const dotenv = require("dotenv");
+const { validateRegexPattern } = require("./validation");
 
 dotenv.config();
 
-function required(name) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing required env var: ${name}`);
-  return v;
+const SNOWFLAKE_RE = /^\d{17,20}$/;
+const PLACEHOLDER_RE = /^(YOUR_|CHANGEME|REPLACE_ME)/i;
+
+function read(env, name) {
+  const raw = env[name];
+  if (raw == null) return undefined;
+  const value = String(raw).trim();
+  return value === "" ? undefined : value;
 }
 
-function optional(name, fallback = undefined) {
-  const v = process.env[name];
-  return v ?? fallback;
+function required(env, name) {
+  const value = read(env, name);
+  if (!value) throw new Error(`Missing required env var: ${name}`);
+  if (PLACEHOLDER_RE.test(value)) {
+    throw new Error(`${name} still contains an example placeholder`);
+  }
+  return value;
 }
 
-function bool(name, fallback = false) {
-  const v = optional(name);
-  if (v === undefined) return fallback;
-  return ["1", "true", "yes", "y", "on"].includes(
-    String(v).trim().toLowerCase()
-  );
+function optional(env, name, fallback = undefined) {
+  const value = read(env, name);
+  if (value === undefined) return fallback;
+  if (PLACEHOLDER_RE.test(value)) {
+    throw new Error(`${name} still contains an example placeholder`);
+  }
+  return value;
 }
 
-function int(name, fallback) {
-  const v = optional(name);
-  if (v === undefined) return fallback;
-  const n = Number.parseInt(v, 10);
-  return Number.isFinite(n) ? n : fallback;
+function bool(env, name, fallback = false) {
+  const value = read(env, name);
+  if (value === undefined) return fallback;
+  const normalized = value.toLowerCase();
+  if (["1", "true", "yes", "y", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "n", "off"].includes(normalized)) return false;
+  throw new Error(`${name} must be a boolean (true/false, on/off, 1/0)`);
 }
-const allowedRoleIds = String(process.env.ALLOWED_ROLE_IDS || "")
-  .split(",")
-  .map((x) => x.trim())
-  .filter(Boolean);
 
-const config = {
-  discordToken: required("DISCORD_TOKEN"),
-  clientId: optional("DISCORD_CLIENT_ID"),
-  guildId: optional("DISCORD_GUILD_ID"),
-  notifyChannelId: optional("DISCORD_NOTIFY_CHANNEL_ID"),
-  prefix: optional("PREFIX", "."),
+function int(env, name, fallback, min, max) {
+  const value = read(env, name);
+  if (value === undefined) return fallback;
+  if (!/^-?\d+$/.test(value)) throw new Error(`${name} must be an integer`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+    throw new Error(`${name} must be between ${min} and ${max}`);
+  }
+  return parsed;
+}
 
-  // Optional: role to grant to streamers while they are live (based on stored discordId)
-  streamerLiveRoleId: optional("STREAMER_LIVE_ROLE_ID"),
+function snowflake(env, name, fallback = undefined) {
+  const value = optional(env, name, fallback);
+  if (value === undefined) return undefined;
+  if (!SNOWFLAKE_RE.test(value)) {
+    throw new Error(`${name} must be a valid Discord snowflake ID`);
+  }
+  return value;
+}
 
-  mentionHere: bool("MENTION_HERE", true),
+function snowflakeList(env, name) {
+  const raw = read(env, name);
+  if (!raw) return [];
+  const values = raw.split(",").map((x) => x.trim()).filter(Boolean);
+  for (const value of values) {
+    if (!SNOWFLAKE_RE.test(value)) {
+      throw new Error(`${name} contains an invalid Discord snowflake: ${value}`);
+    }
+  }
+  return [...new Set(values)];
+}
 
-  keywordRegex: optional("KEYWORD_REGEX", "nox\\s*rp"),
+function loadConfig(env = process.env) {
+  const prefix = optional(env, "PREFIX", ".");
+  if (!prefix || prefix.length > 5 || /\s/.test(prefix)) {
+    throw new Error("PREFIX must be 1..5 non-whitespace characters");
+  }
 
-  checkIntervalSeconds: int("CHECK_INTERVAL_SECONDS", 60),
+  const keywordRegex = optional(env, "KEYWORD_REGEX", "nox\\s*rp");
+  const regexCheck = validateRegexPattern(keywordRegex);
+  if (!regexCheck.ok) throw new Error(`KEYWORD_REGEX: ${regexCheck.error}`);
 
-  // Optional discovery mode: scan platforms for ANY matching live stream
-  discoveryMode: bool("DISCOVERY_MODE", false),
-  discoveryTwitchPages: int("DISCOVERY_TWITCH_PAGES", 5),
-  discoveryKickLimit: int("DISCOVERY_KICK_LIMIT", 100),
+  return {
+    discordToken: required(env, "DISCORD_TOKEN"),
+    clientId: snowflake(env, "DISCORD_CLIENT_ID"),
+    guildId: snowflake(env, "DISCORD_GUILD_ID"),
+    notifyChannelId: snowflake(env, "DISCORD_NOTIFY_CHANNEL_ID"),
+    prefix,
+    streamerLiveRoleId: snowflake(env, "STREAMER_LIVE_ROLE_ID"),
+    mentionHere: bool(env, "MENTION_HERE", true),
+    keywordRegex,
+    checkIntervalSeconds: int(env, "CHECK_INTERVAL_SECONDS", 60, 10, 3600),
+    discoveryMode: bool(env, "DISCOVERY_MODE", false),
+    discoveryTwitchPages: int(env, "DISCOVERY_TWITCH_PAGES", 5, 1, 50),
+    discoveryKickLimit: int(env, "DISCOVERY_KICK_LIMIT", 100, 1, 100),
+    envOverridesDb: bool(env, "ENV_OVERRIDES_DB", false),
+    twitch: {
+      clientId: optional(env, "TWITCH_CLIENT_ID"),
+      clientSecret: optional(env, "TWITCH_CLIENT_SECRET"),
+      gta5GameId: optional(env, "TWITCH_GTA5_GAME_ID", "32982"),
+    },
+    kick: {
+      clientId: optional(env, "KICK_CLIENT_ID"),
+      clientSecret: optional(env, "KICK_CLIENT_SECRET"),
+      gtaCategoryName: optional(env, "KICK_GTA_CATEGORY_NAME", "Grand Theft Auto V"),
+    },
+    allowedRoleIds: snowflakeList(env, "ALLOWED_ROLE_IDS"),
+  };
+}
 
-  // When true, env settings overwrite DB settings on startup (legacy behavior).
-  // Default: false (DB is the source of truth; env is used as defaults only).
-  envOverridesDb: bool("ENV_OVERRIDES_DB", false),
+const config = loadConfig();
 
-  twitch: {
-    clientId: optional("TWITCH_CLIENT_ID"),
-    clientSecret: optional("TWITCH_CLIENT_SECRET"),
-    gta5GameId: optional("TWITCH_GTA5_GAME_ID", "32982"),
-  },
-
-  kick: {
-    clientId: optional("KICK_CLIENT_ID"),
-    clientSecret: optional("KICK_CLIENT_SECRET"),
-    gtaCategoryName: optional("KICK_GTA_CATEGORY_NAME", "Grand Theft Auto V"),
-  },
-  allowedRoleIds,
+module.exports = {
+  config,
+  loadConfig,
+  SNOWFLAKE_RE,
 };
-
-module.exports = { config };

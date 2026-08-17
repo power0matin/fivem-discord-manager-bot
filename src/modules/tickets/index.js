@@ -242,7 +242,7 @@ async function createOrUpdatePanel(ctx, channel, overrides) {
   s.panelChannelId = channel.id;
   s.panelMessageId = sent.id;
 
-  await ctx.persistDb().catch(() => null);
+  await ctx.persistDb();
 
   return { mode: "sent", messageId: sent.id };
 }
@@ -287,7 +287,8 @@ async function ensureTicketPerms(ctx, guild, channel, ownerId, staffRoleIds) {
     });
   }
 
-  await channel.permissionOverwrites.set(overwrites).catch(() => null);
+  await channel.permissionOverwrites.set(overwrites);
+  return true;
 }
 
 function countOpenTicketsForUser(state, userId) {
@@ -296,7 +297,7 @@ function countOpenTicketsForUser(state, userId) {
   return Object.values(m).filter(Boolean).length;
 }
 
-async function createTicket(ctx, interaction, typeKey) {
+async function createTicketUnlocked(ctx, interaction, typeKey) {
   const t = getTicketsDb(ctx);
   const s = t.settings;
   const st = t.state;
@@ -373,14 +374,34 @@ async function createTicket(ctx, interaction, typeKey) {
   const typePart = sanitizeChannelName(typeKey);
   const name = `${basePrefix}-${typePart}-${userPart}`.slice(0, 90);
 
+  const me = interaction.guild.members.me;
+  if (
+    !me?.permissions?.has(PermissionsBitField.Flags.ManageChannels) ||
+    !me?.permissions?.has(PermissionsBitField.Flags.ManageRoles)
+  ) {
+    await safeReply(interaction, {
+      ephemeral: true,
+      content: "❌ Bot needs Manage Channels and Manage Roles to create private tickets safely.",
+    });
+    return;
+  }
+
   const channel = await interaction.guild.channels
     .create({
       name,
       type: ChannelType.GuildText,
       parent: category.id,
+      permissionOverwrites: [
+        { id: interaction.guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+        { id: userId, allow: [PermissionsBitField.Flags.ViewChannel] },
+        { id: ctx.client.user.id, allow: [PermissionsBitField.Flags.ViewChannel] },
+      ],
       reason: `Ticket created by ${interaction.user.tag} (${typeKey})`,
     })
-    .catch(() => null);
+    .catch((err) => {
+      console.error("[Tickets] Failed to create private ticket channel:", err?.message ?? err);
+      return null;
+    });
 
   if (!channel) {
     await safeReply(interaction, {
@@ -397,13 +418,23 @@ async function createTicket(ctx, interaction, typeKey) {
     ...(Array.isArray(s.staffRoleIds) ? s.staffRoleIds : []),
   ]);
 
-  await ensureTicketPerms(
-    ctx,
-    interaction.guild,
-    channel,
-    userId,
-    staffRoleIds
-  );
+  try {
+    await ensureTicketPerms(
+      ctx,
+      interaction.guild,
+      channel,
+      userId,
+      staffRoleIds
+    );
+  } catch (err) {
+    console.error("[Tickets] Failed to apply private ticket permissions:", err?.message ?? err);
+    await channel.delete("Ticket privacy setup failed").catch(() => null);
+    await safeReply(interaction, {
+      ephemeral: true,
+      content: "❌ Ticket privacy setup failed; the temporary channel was removed.",
+    });
+    return;
+  }
 
   // store state
   st.byUser[userId][typeKey] = channel.id;
@@ -414,13 +445,14 @@ async function createTicket(ctx, interaction, typeKey) {
     claimedById: null,
     assignedToId: null,
     openMessageId: null,
+    lifecycle: "open",
   };
 
   // legacy mirrors
   st.openByUserId[userId] = channel.id;
   st.openByChannelId[channel.id] = userId;
 
-  await ctx.persistDb().catch(() => null);
+  await ctx.persistDb();
 
   // Ticket intro embed
   const intro = applyVars(type.introMessage, {
@@ -489,7 +521,7 @@ async function createTicket(ctx, interaction, typeKey) {
 
   if (msg) {
     st.channels[channel.id].openMessageId = msg.id;
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
   }
 
   await safeReply(interaction, {
@@ -500,6 +532,29 @@ async function createTicket(ctx, interaction, typeKey) {
   await logToChannel(ctx, {
     content: `🎫 Ticket created: **${type.label}** by <@${userId}> in <#${channel.id}>`,
   });
+}
+
+const ticketCreateLocks = new Set();
+
+async function createTicket(ctx, interaction, typeKey) {
+  const userId = interaction?.user?.id;
+  const key = userId ? `${userId}:${typeKey}` : null;
+  if (!key) return createTicketUnlocked(ctx, interaction, typeKey);
+
+  if (ticketCreateLocks.has(key)) {
+    await safeReply(interaction, {
+      ephemeral: true,
+      content: "⏳ A ticket creation request is already in progress for this category.",
+    });
+    return;
+  }
+
+  ticketCreateLocks.add(key);
+  try {
+    return await createTicketUnlocked(ctx, interaction, typeKey);
+  } finally {
+    ticketCreateLocks.delete(key);
+  }
 }
 
 async function claimTicket(ctx, interaction) {
@@ -535,7 +590,7 @@ async function claimTicket(ctx, interaction) {
   }
 
   meta.claimedById = interaction.user.id;
-  await ctx.persistDb().catch(() => null);
+  await ctx.persistDb();
 
   // Update channel topic (best-effort)
   try {
@@ -596,7 +651,7 @@ async function assignTicket(ctx, interaction, targetUserId) {
   const meta = t.state.channels[channelId];
 
   meta.assignedToId = targetUserId || null;
-  await ctx.persistDb().catch(() => null);
+  await ctx.persistDb();
 
   if (!targetUserId) {
     await safeReply(interaction, {
@@ -745,22 +800,13 @@ async function closeTicket(ctx, interaction, reasonText) {
     return;
   }
 
-  // Remove mappings
   const ownerId = meta.ownerId;
   const typeKey = meta.typeKey;
 
-  delete t.state.channels[channelId];
-
-  if (t.state.byUser?.[ownerId]?.[typeKey] === channelId) {
-    delete t.state.byUser[ownerId][typeKey];
-  }
-
-  // legacy mirrors best-effort
-  delete t.state.openByChannelId[channelId];
-  if (t.state.openByUserId[ownerId] === channelId)
-    delete t.state.openByUserId[ownerId];
-
-  await ctx.persistDb().catch(() => null);
+  // Persist the closing state first. Mappings are kept until Discord confirms deletion.
+  meta.lifecycle = "closing";
+  meta.closingAt = Date.now();
+  await ctx.persistDb();
 
   await safeReply(interaction, {
     ephemeral: true,
@@ -804,15 +850,35 @@ async function closeTicket(ctx, interaction, reasonText) {
     files: transcript ? [transcript] : [],
   });
 
-  // Final message and delete channel
+  // Final message and delete channel. Remove persistent mappings only after deletion succeeds.
   await interaction.channel
     .send("🔒 Ticket closed. This channel will be deleted.")
     .catch(() => null);
-  setTimeout(() => {
-    interaction.channel
-      .delete(`Ticket closed by ${interaction.user.tag}`)
-      .catch(() => null);
-  }, 1500);
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  const deleted = await interaction.channel
+    .delete(`Ticket closed by ${interaction.user.tag}`)
+    .then(() => true)
+    .catch((err) => {
+      console.error("[Tickets] Channel deletion failed:", err?.message ?? err);
+      return false;
+    });
+
+  if (!deleted) {
+    meta.lifecycle = "open";
+    delete meta.closingAt;
+    await ctx.persistDb();
+    return;
+  }
+
+  delete t.state.channels[channelId];
+  if (t.state.byUser?.[ownerId]?.[typeKey] === channelId) {
+    delete t.state.byUser[ownerId][typeKey];
+  }
+  delete t.state.openByChannelId[channelId];
+  if (t.state.openByUserId[ownerId] === channelId) {
+    delete t.state.openByUserId[ownerId];
+  }
+  await ctx.persistDb();
 }
 
 async function moveTicketOwnerToVoice(ctx, interaction) {
@@ -868,15 +934,19 @@ async function moveTicketOwnerToVoice(ctx, interaction) {
     return;
   }
 
-  await ownerMember.voice
+  const moved = await ownerMember.voice
     .setChannel(targetVoiceId, "Ticket voice move")
+    .then(() => true)
     .catch(async () => {
       await safeReply(interaction, {
         ephemeral: true,
         content:
           "❌ Failed to move user. Check bot permissions (Move Members) and role hierarchy.",
       });
+      return false;
     });
+
+  if (!moved) return;
 
   await safeReply(interaction, {
     ephemeral: true,
@@ -891,7 +961,7 @@ async function handleChatCommand(interaction, ctx) {
 
   if (sub === "toggle") {
     s.enabled = Boolean(interaction.options.getBoolean("enabled", true));
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Tickets are now: **${s.enabled ? "ON" : "OFF"}**`,
@@ -902,7 +972,7 @@ async function handleChatCommand(interaction, ctx) {
   if (sub === "set-log-channel") {
     const ch = interaction.options.getChannel("channel", true);
     s.logChannelId = ch.id;
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Log channel set to <#${ch.id}>`,
@@ -912,7 +982,7 @@ async function handleChatCommand(interaction, ctx) {
 
   if (sub === "clear-log-channel") {
     s.logChannelId = null;
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: "✅ Log channel cleared.",
@@ -1000,7 +1070,7 @@ async function handleChatCommand(interaction, ctx) {
       },
     };
 
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Added type: **${label}** (key: \`${key}\`)`,
@@ -1021,7 +1091,7 @@ async function handleChatCommand(interaction, ctx) {
     }
 
     delete s.types[key];
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Removed type: \`${key}\``,
@@ -1064,7 +1134,7 @@ async function handleChatCommand(interaction, ctx) {
     }
 
     s.types[key].categoryId = category.id;
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Updated category for \`${key}\` to <#${category.id}>`,
@@ -1105,7 +1175,7 @@ async function handleChatCommand(interaction, ctx) {
         s.types[key].staffRoleIds = uniq(arr.filter((id) => id !== role.id));
     }
 
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: "✅ Updated staff roles.",
@@ -1147,7 +1217,7 @@ async function handleChatCommand(interaction, ctx) {
         s.types[key].mentionRoleIds = uniq(arr.filter((id) => id !== role.id));
     }
 
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: "✅ Updated mention roles.",
@@ -1179,7 +1249,7 @@ async function handleChatCommand(interaction, ctx) {
     s.types[key].voiceMove.enabled = enabled;
     if (voice) s.types[key].voiceMove.targetVoiceChannelId = voice.id;
 
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: "✅ Updated voice move settings.",
@@ -1325,6 +1395,38 @@ async function handleInteraction(interaction, ctx) {
 }
 
 function register(ctx) {
+  // Reconcile persistent ticket state with Discord after restart/crash.
+  ctx.client.on(Events.ClientReady, async () => {
+    const t = getTicketsDb(ctx);
+    let changed = false;
+
+    for (const [channelId, meta] of Object.entries(t.state.channels || {})) {
+      const channel = await ctx.client.channels.fetch(channelId).catch(() => null);
+      if (channel) {
+        if (meta.lifecycle === "closing") {
+          meta.lifecycle = "open";
+          delete meta.closingAt;
+          changed = true;
+        }
+        continue;
+      }
+
+      const ownerId = meta?.ownerId;
+      const typeKey = meta?.typeKey;
+      delete t.state.channels[channelId];
+      delete t.state.openByChannelId[channelId];
+      if (ownerId && t.state.openByUserId?.[ownerId] === channelId) {
+        delete t.state.openByUserId[ownerId];
+      }
+      if (ownerId && typeKey && t.state.byUser?.[ownerId]?.[typeKey] === channelId) {
+        delete t.state.byUser[ownerId][typeKey];
+      }
+      changed = true;
+    }
+
+    if (changed) await ctx.persistDb();
+  });
+
   // Optional: "-pend @User" parsing inside ticket channels
   ctx.client.on(Events.MessageCreate, async (message) => {
     try {

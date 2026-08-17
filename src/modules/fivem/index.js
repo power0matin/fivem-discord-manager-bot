@@ -277,7 +277,9 @@ function nextDailyTimeMs(nowMs, hh, mm) {
     0
   ).getTime();
   if (cand > nowMs) return cand;
-  return cand + 24 * 60 * 60 * 1000;
+  const next = new Date(cand);
+  next.setDate(next.getDate() + 1);
+  return next.getTime();
 }
 
 function computeNextRestartMs(nowMs, times) {
@@ -406,7 +408,12 @@ async function fetchJson(url, timeoutMs) {
     if (isJson && typeof res.data === "object" && res.data != null) {
       return { ok: true, status: res.status, data: res.data };
     }
-    return { ok: true, status: res.status, data: res.data };
+    return {
+      ok: false,
+      status: res.status,
+      data: res.data,
+      error: "Expected a JSON object from FiveM endpoint",
+    };
   }
 
   return { ok: false, status: res.status, data: res.data };
@@ -457,7 +464,17 @@ async function getFiveMStatus(baseUrl, timeoutMs) {
     textNope(inf) ||
     textNope(ply);
 
-  const online = (dyn.ok || inf.ok || ply.ok) && !blocked;
+  const dynamicValid = Boolean(
+    dyn.ok &&
+      dyn.data &&
+      typeof dyn.data === "object" &&
+      ("clients" in dyn.data || "sv_maxclients" in dyn.data || "hostname" in dyn.data || "vars" in dyn.data)
+  );
+  const infoValid = Boolean(
+    inf.ok && inf.data && typeof inf.data === "object" && inf.data.vars && typeof inf.data.vars === "object"
+  );
+  const playersValid = Boolean(ply.ok && Array.isArray(ply.data));
+  const online = (dynamicValid || infoValid || playersValid) && !blocked;
 
   return {
     online,
@@ -682,7 +699,7 @@ async function ensureStatusMessage(ctx, embed) {
   try {
     const sent = await channel.send({ embeds: [embed], components });
     s.statusMessageId = sent.id;
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     return { ok: true, mode: "sent" };
   } catch (e) {
     return {
@@ -752,7 +769,7 @@ async function doPoll(ctx, opts = {}) {
     if (!force) st.nextAllowedAt = now + nextBackoffMs(st.consecutiveFailures);
   }
 
-  await ctx.persistDb().catch(() => null);
+  await ctx.persistDb();
 
   const embed = buildStatusEmbed(ctx, status);
 
@@ -846,7 +863,7 @@ async function handleInteraction(interaction, ctx) {
       return true;
     }
     s.baseUrl = normalized;
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Endpoint set to \`${normalized}\`.`,
@@ -859,7 +876,7 @@ async function handleInteraction(interaction, ctx) {
     s.statusChannelId = ch.id;
     // reset message id so we don't try editing a message in old channel
     s.statusMessageId = null;
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Status channel set to <#${ch.id}>.`,
@@ -872,7 +889,7 @@ async function handleInteraction(interaction, ctx) {
     const clamped = Math.max(60, Math.min(Number(seconds || 300), 3600));
     s.checkIntervalSeconds = clamped;
 
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Interval set to ${clamped}s (recommended: 300s).`,
@@ -887,7 +904,7 @@ async function handleInteraction(interaction, ctx) {
   if (sub === "toggle") {
     const enabled = interaction.options.getBoolean("enabled", true);
     s.enabled = Boolean(enabled);
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
 
     if (s.enabled) {
       const res = await doPoll(ctx, { force: true, updateMessage: true }).catch(
@@ -1013,7 +1030,7 @@ async function handleInteraction(interaction, ctx) {
   if (sub === "set-title") {
     const title = interaction.options.getString("title", true);
     s.title = String(title).slice(0, 256);
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: "✅ Title updated.",
@@ -1024,7 +1041,7 @@ async function handleInteraction(interaction, ctx) {
   if (sub === "set-description") {
     const text = interaction.options.getString("text", true);
     s.description = String(text).slice(0, 512);
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: "✅ Description updated.",
@@ -1050,7 +1067,7 @@ async function handleInteraction(interaction, ctx) {
       s.bannerImageUrl = normalized;
     }
 
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: "✅ Banner updated.",
@@ -1074,7 +1091,7 @@ async function handleInteraction(interaction, ctx) {
     s.websiteUrl = normalized;
     if (label) s.websiteLabel = String(label).slice(0, 80);
 
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: "✅ Website set.",
@@ -1099,7 +1116,7 @@ async function handleInteraction(interaction, ctx) {
     s.connectUrl = normalized;
     if (label) s.connectLabel = String(label).slice(0, 80);
 
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: "✅ Connect set.",
@@ -1110,7 +1127,7 @@ async function handleInteraction(interaction, ctx) {
   if (sub === "set-connect-command") {
     const cmd = interaction.options.getString("command", true);
     s.connectCommand = String(cmd).slice(0, 200);
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: "✅ Connect command updated.",
@@ -1136,7 +1153,7 @@ async function handleInteraction(interaction, ctx) {
       s.restartTimes = parsed;
     }
 
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: "✅ Restart times updated.",
@@ -1150,7 +1167,7 @@ async function handleInteraction(interaction, ctx) {
 
     if (clear) {
       s.voiceStatusChannelId = null;
-      await ctx.persistDb().catch(() => null);
+      await ctx.persistDb();
       await safeReply(interaction, {
         ephemeral: true,
         content: "✅ Voice status channel disabled.",
@@ -1167,7 +1184,7 @@ async function handleInteraction(interaction, ctx) {
     }
 
     s.voiceStatusChannelId = ch.id;
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Voice status channel set to <#${ch.id}>.`,
@@ -1178,7 +1195,7 @@ async function handleInteraction(interaction, ctx) {
   if (sub === "set-scheduled-events") {
     const enabled = interaction.options.getBoolean("enabled", true);
     s.enableScheduledEvents = Boolean(enabled);
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Scheduled events are now: **${fmtBool(s.enableScheduledEvents)}**.`,
@@ -1284,8 +1301,10 @@ async function createRestartEvent(ctx) {
       return;
     }
 
-    // Check if there's already an upcoming event
-    const guild = await ctx.client.guilds.fetch(s.statusGuildId || s.statusChannelId).catch(() => null);
+    // Resolve the guild from the configured status channel; a channel ID is not a guild ID.
+    if (!s.statusChannelId) return;
+    const statusChannel = await ctx.client.channels.fetch(s.statusChannelId).catch(() => null);
+    const guild = statusChannel?.guild || null;
     if (!guild) return;
 
     const events = await guild.scheduledEvents.fetch().catch(() => null);
@@ -1302,7 +1321,7 @@ async function createRestartEvent(ctx) {
     const endTime = new Date(nextRestartMs + 5 * 60 * 1000); // 5 min window
 
     const title = s.title || "FiveM Server";
-    await guild.scheduledEvents
+    const createdEvent = await guild.scheduledEvents
       .create({
         name: `${title} - Scheduled Restart`,
         scheduledStartTime: startTime,
@@ -1314,10 +1333,14 @@ async function createRestartEvent(ctx) {
           location: s.baseUrl || "FiveM Server",
         },
       })
-      .catch(() => null);
+      .catch((err) => {
+        console.error("[FiveM] Failed to create scheduled restart event:", err?.message ?? err);
+        return null;
+      });
 
+    if (!createdEvent) return;
     st.lastRestartEventAt = now;
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
   } catch (_) {}
 }
 

@@ -302,8 +302,9 @@ async function main() {
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
 
-      // Needed to reliably fetch members for role add/remove
+      // Needed to reliably fetch members for role add/remove and online stats.
       GatewayIntentBits.GuildMembers,
+      GatewayIntentBits.GuildPresences,
     ],
   });
 
@@ -1085,7 +1086,7 @@ async function main() {
       const now = Date.now();
       const shouldSaveMeta = now - lastMetaSaveAt > 5 * 60_000;
       if (changed || healthDirty || dbDirty || shouldSaveMeta) {
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
         lastMetaSaveAt = now;
       }
       healthDirty = false;
@@ -1740,7 +1741,7 @@ async function main() {
       if (sub === "kickcategory") {
         db.settings.kickGtaCategoryId = null;
         db.settings.kickGtaCategoryResolvedAt = 0;
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
 
         const id = await ensureKickGtaCategoryId();
         await replySafe(
@@ -1792,7 +1793,7 @@ async function main() {
         }
 
         db.settings.notifyChannelId = chId;
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
         await replySafe(message, `✅ | notify channel set to <#${chId}>`);
         return;
       }
@@ -1807,7 +1808,7 @@ async function main() {
           return;
         }
         db.settings.mentionHere = v;
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
         await replySafe(
           message,
           `✅ | mentionHere set to **${v ? "on" : "off"}**`
@@ -1825,7 +1826,7 @@ async function main() {
           return;
         }
         db.settings.checkIntervalSeconds = n;
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
         await restartIntervalIfRunning();
         await replySafe(
           message,
@@ -1844,7 +1845,7 @@ async function main() {
           return;
         }
         db.settings.discoveryMode = v;
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
         await replySafe(
           message,
           `✅ | discoveryMode set to **${v ? "on" : "off"}**`
@@ -1862,7 +1863,7 @@ async function main() {
           return;
         }
         db.settings.discoveryTwitchPages = n;
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
         await replySafe(message, `✅ | discoveryTwitchPages set to **${n}**`);
         return;
       }
@@ -1877,7 +1878,7 @@ async function main() {
           return;
         }
         db.settings.discoveryKickLimit = n;
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
         await replySafe(message, `✅ | discoveryKickLimit set to **${n}**`);
         return;
       }
@@ -1892,7 +1893,7 @@ async function main() {
           return;
         }
         db.settings.twitchGta5GameId = id;
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
         await replySafe(message, `✅ | Twitch game_id set to **${id}**`);
         return;
       }
@@ -1907,7 +1908,7 @@ async function main() {
           return;
         }
         db.settings.keywordRegex = pattern;
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
         await replySafe(message, `✅ | keywordRegex set to \`${pattern}\``);
         return;
       }
@@ -1925,7 +1926,7 @@ async function main() {
         db.settings.kickGtaCategoryName = name;
         db.settings.kickGtaCategoryId = null;
         db.settings.kickGtaCategoryResolvedAt = 0;
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
         await replySafe(
           message,
           `✅ | Kick category name set to **${name}** (will re-resolve id)`
@@ -2058,7 +2059,7 @@ async function main() {
           added++;
         }
 
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
         await replySafe(message, `✅ | Added **${added}** Kick streamer(s).`);
         return;
       }
@@ -2098,7 +2099,7 @@ async function main() {
         }
 
         row.discordId = discordId;
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
         await replySafe(
           message,
           discordId
@@ -2127,7 +2128,7 @@ async function main() {
           // eslint-disable-next-line no-await-in-loop
           await ensureOfflineMessageDeleted("kick", slug);
         }
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
         await replySafe(
           message,
           `🗑️ | Cleared Kick streamer list (**${toDelete.length}** removed).`
@@ -2153,7 +2154,7 @@ async function main() {
 
         const deleted = await ensureOfflineMessageDeleted("kick", slug);
 
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
 
         if (!removed) {
           await replySafe(
@@ -2209,7 +2210,7 @@ async function main() {
       }
 
       db.kick.streamers.push({ slug, discordId });
-      await saveDb(db).catch(() => null);
+      await saveDb(db);
 
       await replySafe(
         message,
@@ -2293,7 +2294,7 @@ async function main() {
           added++;
         }
 
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
         await replySafe(message, `✅ | Added **${added}** Twitch streamer(s).`);
         return;
       }
@@ -2333,7 +2334,7 @@ async function main() {
         }
 
         row.discordId = discordId;
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
         await replySafe(
           message,
           discordId
@@ -2362,7 +2363,7 @@ async function main() {
           // eslint-disable-next-line no-await-in-loop
           await ensureOfflineMessageDeleted("twitch", login);
         }
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
         await replySafe(
           message,
           `🗑️ | Cleared Twitch streamer list (**${toDelete.length}** removed).`
@@ -2388,7 +2389,7 @@ async function main() {
 
         const deleted = await ensureOfflineMessageDeleted("twitch", login);
 
-        await saveDb(db).catch(() => null);
+        await saveDb(db);
 
         if (!removed) {
           await replySafe(
@@ -2443,7 +2444,7 @@ async function main() {
       }
 
       db.twitch.streamers.push({ login, discordId });
-      await saveDb(db).catch(() => null);
+      await saveDb(db);
 
       await replySafe(
         message,
@@ -2476,18 +2477,10 @@ async function main() {
     await restartIntervalIfRunning();
   });
 
-  process.on("unhandledRejection", (reason) => {
-    console.error("[UnhandledRejection]", reason);
-  });
-
-  process.on("uncaughtException", (err) => {
-    console.error("[UncaughtException]", err);
-  });
-
   await loginWithRetry(client, config.discordToken);
 }
 
 main().catch((err) => {
-  // Keep process alive for transient network conditions.
   console.error("[Fatal]", err);
+  process.exitCode = 1;
 });
