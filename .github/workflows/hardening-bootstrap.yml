@@ -1,0 +1,46 @@
+name: Hardening bootstrap
+
+on:
+  push:
+    branches:
+      - agent/production-hardening
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/production-hardening
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply deterministic source hardening
+        run: node scripts/apply-hardening.js
+
+      - name: Syntax-check modified runtime files
+        run: |
+          node --check src/modules/welcome/index.js
+          node --check src/modules/fivem/index.js
+          node --check src/modules/tickets/index.js
+          node --check src/modules/stream-notifier/index.js
+          node --check src/modules/stream-notifier/slash/setup.js
+
+      - name: Commit patched source
+        run: |
+          if git diff --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/
+          git commit -m 'fix: apply production runtime hardening [skip ci]'
+          git push origin HEAD:agent/production-hardening
