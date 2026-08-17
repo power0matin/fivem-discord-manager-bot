@@ -31,6 +31,7 @@ jobs:
           fi
           node scripts/apply-storage-cleanup-hardening.js
           node scripts/apply-deploy-transaction-cleanup.js
+          node scripts/apply-interrupted-install-recovery.js
 
       - name: Refresh lockfile for Node 22+ policy
         run: npm install --package-lock-only --ignore-scripts
