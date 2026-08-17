@@ -13,7 +13,8 @@ WorkingDirectory=/opt/fivem-discord-manager-bot/current
 EnvironmentFile=/etc/fivem-discord-manager-bot/bot.env
 Environment=NODE_ENV=production
 Environment=DATA_FILE=/var/lib/fivem-discord-manager-bot/data.json
-ExecStart=/usr/bin/node src/index.js
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/env node src/index.js
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
