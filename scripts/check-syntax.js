@@ -5,14 +5,13 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const roots = ["src", "scripts", "test"];
-const skip = new Set(["scripts/apply-hardening.js"]);
 
 function collect(dir, out = []) {
   if (!fs.existsSync(dir)) return out;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) collect(full, out);
-    else if (entry.isFile() && full.endsWith(".js") && !skip.has(full.replaceAll("\\", "/"))) out.push(full);
+    else if (entry.isFile() && full.endsWith(".js")) out.push(full);
   }
   return out;
 }
