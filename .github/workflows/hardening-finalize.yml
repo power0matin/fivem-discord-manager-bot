@@ -26,12 +26,14 @@ jobs:
           if ! grep -q 'async function createTicketUnlocked' src/modules/tickets/index.js; then
             node scripts/apply-hardening-2.js
           fi
-      - name: Refresh dependency lock and validate
+      - name: Refresh dependency lock
         run: |
           npm install --package-lock-only --ignore-scripts
           npm ci
-          npm run verify
-          npm audit --audit-level=high
+      - name: Dependency security gate
+        run: npm audit --audit-level=high
+      - name: Full regression suite
+        run: npm run verify
       - name: Commit generated changes
         run: |
           if git diff --quiet -- src package-lock.json; then
