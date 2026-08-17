@@ -1339,8 +1339,15 @@ async function createRestartEvent(ctx) {
       });
 
     if (!createdEvent) return;
+    const previousRestartEventAt = st.lastRestartEventAt;
     st.lastRestartEventAt = now;
-    await ctx.persistDb();
+    try {
+      await ctx.persistDb();
+    } catch (err) {
+      st.lastRestartEventAt = previousRestartEventAt;
+      console.error("[FiveM] Failed to persist scheduled restart event state:", err?.message ?? err);
+      return;
+    }
   } catch (_) {}
 }
 
@@ -1396,4 +1403,9 @@ function register(ctx) {
 module.exports = {
   register,
   handleInteraction,
+  _test: {
+    createRestartEvent,
+    computeNextRestartMs,
+    getFiveMStatus,
+  },
 };

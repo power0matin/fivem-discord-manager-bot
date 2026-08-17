@@ -14,6 +14,15 @@ const {
   AttachmentBuilder,
   MessageFlagsBitField,
 } = require("discord.js");
+const {
+  staffRoleIdsForType,
+  validateTicketPermissionModel,
+  setTicketMappings,
+  clearTicketMappings,
+  cleanupFailedTicketChannel,
+  persistCreatedTicketOrRollback,
+  reconcileTicketState,
+} = require("./safety");
 
 // --- Custom IDs ---
 const CREATE_PREFIX = "tickets:create:"; // tickets:create:<typeKey>
@@ -374,14 +383,12 @@ async function createTicketUnlocked(ctx, interaction, typeKey) {
   const typePart = sanitizeChannelName(typeKey);
   const name = `${basePrefix}-${typePart}-${userPart}`.slice(0, 90);
 
-  const me = interaction.guild.members.me;
-  if (
-    !me?.permissions?.has(PermissionsBitField.Flags.ManageChannels) ||
-    !me?.permissions?.has(PermissionsBitField.Flags.ManageRoles)
-  ) {
+  const staffRoleIds = staffRoleIdsForType(s, type);
+  const permissionCheck = validateTicketPermissionModel(interaction.guild, staffRoleIds);
+  if (!permissionCheck.ok) {
     await safeReply(interaction, {
       ephemeral: true,
-      content: "❌ Bot needs Manage Channels and Manage Roles to create private tickets safely.",
+      content: `❌ Cannot create a private ticket safely: ${permissionCheck.reason}`,
     });
     return;
   }
@@ -411,13 +418,6 @@ async function createTicketUnlocked(ctx, interaction, typeKey) {
     return;
   }
 
-  const staffRoleIds = uniq([
-    ...(Array.isArray(type.staffRoleIds) ? type.staffRoleIds : []),
-
-    // legacy fallback
-    ...(Array.isArray(s.staffRoleIds) ? s.staffRoleIds : []),
-  ]);
-
   try {
     await ensureTicketPerms(
       ctx,
@@ -428,17 +428,17 @@ async function createTicketUnlocked(ctx, interaction, typeKey) {
     );
   } catch (err) {
     console.error("[Tickets] Failed to apply private ticket permissions:", err?.message ?? err);
-    await channel.delete("Ticket privacy setup failed").catch(() => null);
+    const cleanup = await cleanupFailedTicketChannel(ctx, st, channel, userId, typeKey);
     await safeReply(interaction, {
       ephemeral: true,
-      content: "❌ Ticket privacy setup failed; the temporary channel was removed.",
+      content: cleanup.deleted
+        ? "❌ Ticket privacy setup failed; the temporary channel was removed."
+        : "❌ Ticket setup failed. The private channel is quarantined for automatic recovery.",
     });
     return;
   }
 
-  // store state
-  st.byUser[userId][typeKey] = channel.id;
-  st.channels[channel.id] = {
+  const ticketMeta = {
     ownerId: userId,
     typeKey,
     createdAt: Date.now(),
@@ -448,11 +448,23 @@ async function createTicketUnlocked(ctx, interaction, typeKey) {
     lifecycle: "open",
   };
 
-  // legacy mirrors
-  st.openByUserId[userId] = channel.id;
-  st.openByChannelId[channel.id] = userId;
-
-  await ctx.persistDb();
+  const persisted = await persistCreatedTicketOrRollback(
+    ctx,
+    st,
+    channel,
+    userId,
+    typeKey,
+    ticketMeta
+  );
+  if (!persisted.ok) {
+    await safeReply(interaction, {
+      ephemeral: true,
+      content: persisted.cleaned
+        ? "❌ Ticket state could not be saved; the temporary channel was removed."
+        : "❌ Ticket state could not be saved. The private channel is quarantined for automatic recovery.",
+    });
+    return;
+  }
 
   // Ticket intro embed
   const intro = applyVars(type.introMessage, {
@@ -870,14 +882,7 @@ async function closeTicket(ctx, interaction, reasonText) {
     return;
   }
 
-  delete t.state.channels[channelId];
-  if (t.state.byUser?.[ownerId]?.[typeKey] === channelId) {
-    delete t.state.byUser[ownerId][typeKey];
-  }
-  delete t.state.openByChannelId[channelId];
-  if (t.state.openByUserId[ownerId] === channelId) {
-    delete t.state.openByUserId[ownerId];
-  }
+  clearTicketMappings(t.state, channelId, ownerId, typeKey);
   await ctx.persistDb();
 }
 
@@ -1397,34 +1402,11 @@ async function handleInteraction(interaction, ctx) {
 function register(ctx) {
   // Reconcile persistent ticket state with Discord after restart/crash.
   ctx.client.on(Events.ClientReady, async () => {
-    const t = getTicketsDb(ctx);
-    let changed = false;
-
-    for (const [channelId, meta] of Object.entries(t.state.channels || {})) {
-      const channel = await ctx.client.channels.fetch(channelId).catch(() => null);
-      if (channel) {
-        if (meta.lifecycle === "closing") {
-          meta.lifecycle = "open";
-          delete meta.closingAt;
-          changed = true;
-        }
-        continue;
-      }
-
-      const ownerId = meta?.ownerId;
-      const typeKey = meta?.typeKey;
-      delete t.state.channels[channelId];
-      delete t.state.openByChannelId[channelId];
-      if (ownerId && t.state.openByUserId?.[ownerId] === channelId) {
-        delete t.state.openByUserId[ownerId];
-      }
-      if (ownerId && typeKey && t.state.byUser?.[ownerId]?.[typeKey] === channelId) {
-        delete t.state.byUser[ownerId][typeKey];
-      }
-      changed = true;
+    try {
+      await reconcileTicketState(ctx);
+    } catch (err) {
+      console.error("[Tickets] Startup reconciliation failed:", err?.message ?? err);
     }
-
-    if (changed) await ctx.persistDb();
   });
 
   // Optional: "-pend @User" parsing inside ticket channels
@@ -1476,4 +1458,14 @@ function register(ctx) {
 module.exports = {
   register,
   handleInteraction,
+  _test: {
+    createTicket,
+    createTicketUnlocked,
+    closeTicket,
+    ensureTicketPerms,
+    reconcileTicketState,
+    validateTicketPermissionModel,
+    persistCreatedTicketOrRollback,
+    cleanupFailedTicketChannel,
+  },
 };
