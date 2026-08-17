@@ -59,6 +59,31 @@ test("Node versions below the supported LTS floor fail fast with a clear error",
   }
 });
 
+test("production rejects a Node 22 runtime that is only available from a user-local PATH", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "fivem-user-node-"));
+  try {
+    const fakeNode = path.join(dir, "node");
+    const fakeNpm = path.join(dir, "npm");
+    await fs.writeFile(
+      fakeNode,
+      '#!/usr/bin/env bash\nif [[ "${1:-}" == "-v" ]]; then echo v22.20.0; exit 0; fi\nif [[ "${1:-}" == "-e" ]]; then exit 0; fi\nexit 0\n',
+      "utf8"
+    );
+    await fs.writeFile(fakeNpm, '#!/usr/bin/env bash\nexit 0\n', "utf8");
+    await fs.chmod(fakeNode, 0o755);
+    await fs.chmod(fakeNpm, 0o755);
+
+    const result = runBash(
+      'set -Eeuo pipefail; DEPLOY_TEST_MODE=0; SYSTEMD_PATH=/usr/local/bin:/usr/bin:/bin; source scripts/lib/deploy-common.sh; validate_node_version',
+      { PATH: `${dir}:${process.env.PATH}` }
+    );
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /systemd service Node|system-wide|user-local\/nvm/i);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("first production-install pass creates protected env template and exits without switching release", async () => {
   const h = await createDeployHarness();
   try {
