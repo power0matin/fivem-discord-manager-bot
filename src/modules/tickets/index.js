@@ -297,7 +297,7 @@ function countOpenTicketsForUser(state, userId) {
   return Object.values(m).filter(Boolean).length;
 }
 
-async function createTicket(ctx, interaction, typeKey) {
+async function createTicketUnlocked(ctx, interaction, typeKey) {
   const t = getTicketsDb(ctx);
   const s = t.settings;
   const st = t.state;
@@ -532,6 +532,29 @@ async function createTicket(ctx, interaction, typeKey) {
   await logToChannel(ctx, {
     content: `🎫 Ticket created: **${type.label}** by <@${userId}> in <#${channel.id}>`,
   });
+}
+
+const ticketCreateLocks = new Set();
+
+async function createTicket(ctx, interaction, typeKey) {
+  const userId = interaction?.user?.id;
+  const key = userId ? `${userId}:${typeKey}` : null;
+  if (!key) return createTicketUnlocked(ctx, interaction, typeKey);
+
+  if (ticketCreateLocks.has(key)) {
+    await safeReply(interaction, {
+      ephemeral: true,
+      content: "⏳ A ticket creation request is already in progress for this category.",
+    });
+    return;
+  }
+
+  ticketCreateLocks.add(key);
+  try {
+    return await createTicketUnlocked(ctx, interaction, typeKey);
+  } finally {
+    ticketCreateLocks.delete(key);
+  }
 }
 
 async function claimTicket(ctx, interaction) {
@@ -1372,6 +1395,38 @@ async function handleInteraction(interaction, ctx) {
 }
 
 function register(ctx) {
+  // Reconcile persistent ticket state with Discord after restart/crash.
+  ctx.client.on(Events.ClientReady, async () => {
+    const t = getTicketsDb(ctx);
+    let changed = false;
+
+    for (const [channelId, meta] of Object.entries(t.state.channels || {})) {
+      const channel = await ctx.client.channels.fetch(channelId).catch(() => null);
+      if (channel) {
+        if (meta.lifecycle === "closing") {
+          meta.lifecycle = "open";
+          delete meta.closingAt;
+          changed = true;
+        }
+        continue;
+      }
+
+      const ownerId = meta?.ownerId;
+      const typeKey = meta?.typeKey;
+      delete t.state.channels[channelId];
+      delete t.state.openByChannelId[channelId];
+      if (ownerId && t.state.openByUserId?.[ownerId] === channelId) {
+        delete t.state.openByUserId[ownerId];
+      }
+      if (ownerId && typeKey && t.state.byUser?.[ownerId]?.[typeKey] === channelId) {
+        delete t.state.byUser[ownerId][typeKey];
+      }
+      changed = true;
+    }
+
+    if (changed) await ctx.persistDb();
+  });
+
   // Optional: "-pend @User" parsing inside ticket channels
   ctx.client.on(Events.MessageCreate, async (message) => {
     try {

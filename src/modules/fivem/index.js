@@ -464,7 +464,17 @@ async function getFiveMStatus(baseUrl, timeoutMs) {
     textNope(inf) ||
     textNope(ply);
 
-  const online = (dyn.ok || inf.ok || ply.ok) && !blocked;
+  const dynamicValid = Boolean(
+    dyn.ok &&
+      dyn.data &&
+      typeof dyn.data === "object" &&
+      ("clients" in dyn.data || "sv_maxclients" in dyn.data || "hostname" in dyn.data || "vars" in dyn.data)
+  );
+  const infoValid = Boolean(
+    inf.ok && inf.data && typeof inf.data === "object" && inf.data.vars && typeof inf.data.vars === "object"
+  );
+  const playersValid = Boolean(ply.ok && Array.isArray(ply.data));
+  const online = (dynamicValid || infoValid || playersValid) && !blocked;
 
   return {
     online,

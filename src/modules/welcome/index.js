@@ -396,6 +396,23 @@ async function handleInteraction(interaction, ctx) {
     const label2 = interaction.options.getString("label2", true);
     const url2 = interaction.options.getString("url2", true);
 
+    const isHttpUrl = (value) => {
+      try {
+        const parsed = new URL(String(value));
+        return parsed.protocol === "https:" || parsed.protocol === "http:";
+      } catch {
+        return false;
+      }
+    };
+
+    if (!isHttpUrl(url1) || !isHttpUrl(url2)) {
+      await safeReply(interaction, {
+        ephemeral: true,
+        content: "❌ Button URLs must use http:// or https://.",
+      });
+      return true;
+    }
+
     s.buttons ||= {};
     s.buttons.button1Label = String(label1).slice(0, 80);
     s.buttons.button1Url = String(url1).slice(0, 2048);
@@ -784,15 +801,14 @@ async function updateServerStats(ctx) {
 
     if (!s.statsVoiceChannelId) return;
 
-    const guild = ctx.client.guilds.cache.first();
-    if (!guild) return;
-
     const channel = await ctx.client.channels
       .fetch(s.statsVoiceChannelId)
       .catch(() => null);
 
     if (!channel) return;
     if (channel.type !== ChannelType.GuildVoice) return;
+    const guild = channel.guild;
+    if (!guild) return;
 
     const totalMembers = guild.memberCount;
     const onlineMembers = guild.members.cache.filter(
