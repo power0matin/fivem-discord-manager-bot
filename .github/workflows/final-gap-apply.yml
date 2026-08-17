@@ -22,13 +22,14 @@ jobs:
           node-version: '24'
           cache: npm
 
-      - name: Apply reviewed source patch
+      - name: Apply reviewed source patches
         run: |
           if grep -q '_setFsForTests' src/modules/stream-notifier/storage.js; then
             echo 'Final source patch already applied.'
           else
             node scripts/apply-final-gap-hardening.js
           fi
+          node scripts/apply-storage-cleanup-hardening.js
 
       - name: Refresh lockfile for Node 22+ policy
         run: npm install --package-lock-only --ignore-scripts
