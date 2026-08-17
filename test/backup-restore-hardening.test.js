@@ -17,6 +17,10 @@ async function rewriteChecksum(file) {
   await fs.writeFile(`${file}.sha256`, `${hash}  ${path.basename(file)}\n`, "utf8");
 }
 
+async function assertServiceActive(h) {
+  assert.ok(await fs.stat(h.activeFile));
+}
+
 test("rapid backups are unique, verified and stored outside release directories", async () => {
   const h = await createDeployHarness({ existing: true });
   try {
@@ -46,6 +50,7 @@ test("restore rejects nonexistent backup without changing healthy data", async (
     const result = h.runScript("restore.sh", [path.join(h.backupDir, "missing.json")]);
     assert.notEqual(result.status, 0);
     assert.deepEqual(await h.readData(), original);
+    await assertServiceActive(h);
   } finally {
     await h.cleanup();
   }
@@ -64,6 +69,7 @@ test("restore rejects checksum corruption before touching the database", async (
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /checksum/i);
     assert.deepEqual(await h.readData(), original);
+    await assertServiceActive(h);
   } finally {
     await h.cleanup();
   }
@@ -83,6 +89,7 @@ test("restore rejects malformed JSON even when its checksum is internally consis
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /Invalid persistence file/i);
     assert.deepEqual(await h.readData(), original);
+    await assertServiceActive(h);
   } finally {
     await h.cleanup();
   }
@@ -106,12 +113,13 @@ test("restore readiness failure rolls the original healthy database back", async
     assert.match(result.stderr, /did not become ready/i);
     assert.deepEqual(await h.readData(), original);
     assert.equal(await mode(path.join(h.dataDir, "data.json")), 0o600);
+    await assertServiceActive(h);
   } finally {
     await h.cleanup();
   }
 });
 
-test("restore preserves original state when the data directory is not safely writable", async () => {
+test("restore preserves original state and resumes service when the data directory is not safely writable", async () => {
   const h = await createDeployHarness({ existing: true });
   try {
     const original = await h.readData();
@@ -124,8 +132,38 @@ test("restore preserves original state when the data directory is not safely wri
     assert.notEqual(result.status, 0);
     await fs.chmod(h.dataDir, 0o700);
     assert.deepEqual(await h.readData(), original);
+    await assertServiceActive(h);
   } finally {
     await fs.chmod(h.dataDir, 0o700).catch(() => {});
+    await h.cleanup();
+  }
+});
+
+test("pre-restore safety-backup failure resumes the original service without changing data", async () => {
+  const h = await createDeployHarness({ existing: true });
+  try {
+    const original = await h.readData();
+    const backupResult = h.runScript("backup.sh");
+    assert.equal(backupResult.status, 0, backupResult.stderr);
+    const originalBackup = backupResult.stdout.trim();
+
+    const externalDir = path.join(h.base, "external-restore-source");
+    await fs.mkdir(externalDir, { recursive: true });
+    const restoreSource = path.join(externalDir, path.basename(originalBackup));
+    await fs.copyFile(originalBackup, restoreSource);
+    await fs.copyFile(`${originalBackup}.sha256`, `${restoreSource}.sha256`);
+
+    const invalidSafetyDir = path.join(h.base, "safety-backup-target-is-file");
+    await fs.writeFile(invalidSafetyDir, "not-a-directory", "utf8");
+
+    const result = h.runScript("restore.sh", [restoreSource], {
+      BACKUP_DIR: invalidSafetyDir,
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /pre-restore safety backup|Failed to create/i);
+    assert.deepEqual(await h.readData(), original);
+    await assertServiceActive(h);
+  } finally {
     await h.cleanup();
   }
 });
@@ -144,6 +182,7 @@ test("restore rejects a backup directory nested inside the release tree", async 
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /outside the release directory/i);
     assert.deepEqual(await h.readData(), original);
+    await assertServiceActive(h);
   } finally {
     await h.cleanup();
   }
@@ -164,6 +203,7 @@ test("successful restore preserves schema and enforces mode 0600", async () => {
     assert.deepEqual(await h.readData(), desired);
     assert.equal((await h.readData()).schemaVersion, 1);
     assert.equal(await mode(path.join(h.dataDir, "data.json")), 0o600);
+    await assertServiceActive(h);
   } finally {
     await h.cleanup();
   }
