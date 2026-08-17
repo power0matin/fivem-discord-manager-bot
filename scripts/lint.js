@@ -32,8 +32,9 @@ for (const file of files) {
   lines.forEach((line, index) => {
     if (/[ \t]+$/.test(line)) errors.push(`${file}:${index + 1}: trailing whitespace`);
   });
-  if (file.endsWith(".sh") && !text.includes("set -Eeuo pipefail")) {
-    errors.push(`${file}: deployment shell scripts must enable strict mode`);
+  const executableShellEntrypoint = file.endsWith(".sh") && !file.startsWith("scripts/lib/");
+  if (executableShellEntrypoint && !text.includes("set -Eeuo pipefail")) {
+    errors.push(`${file}: executable shell scripts must enable strict mode`);
   }
   if (file.startsWith(".github/workflows/")) {
     if (/\|\|\s*(true|:)/.test(text)) errors.push(`${file}: CI gates must not mask failures with || true/|| :`);
