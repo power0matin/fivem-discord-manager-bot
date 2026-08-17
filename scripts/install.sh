@@ -11,6 +11,7 @@ SERVICE_FILE="${SERVICE_FILE:-/etc/systemd/system/$APP.service}"
 RELEASES_DIR="$APP_ROOT/releases"
 CURRENT_LINK="$APP_ROOT/current"
 DATA_FILE="$DATA_DIR/data.json"
+SENTINEL="$APP_ROOT/.managed-install"
 
 # shellcheck source=scripts/lib/deploy-common.sh
 source "$SOURCE_DIR/scripts/lib/deploy-common.sh"
@@ -35,15 +36,19 @@ if ! is_test_mode; then
   [[ "$SERVICE_FILE" == "/etc/systemd/system/$APP.service" ]] || die "Custom SERVICE_FILE is supported only in DEPLOY_TEST_MODE."
 fi
 
-for required in package.json package-lock.json .env.example src/index.js deploy/$APP.service scripts/healthcheck.js scripts/backup.sh; do
+for required in package.json package-lock.json .env.example src/index.js deploy/$APP.service scripts/healthcheck.js scripts/backup.sh scripts/validate-data.js; do
   [[ -f "$SOURCE_DIR/$required" ]] || die "SOURCE_DIR is not a complete repository checkout: missing $required"
 done
 
 acquire_deploy_lock
 
 if ! is_test_mode; then
-  nologin_shell="$(command -v nologin || true)"
-  [[ -n "$nologin_shell" ]] || nologin_shell="/usr/sbin/nologin"
+  if command -v nologin >/dev/null 2>&1; then
+    nologin_shell="$(command -v nologin)"
+  else
+    nologin_shell="/usr/sbin/nologin"
+  fi
+  [[ -x "$nologin_shell" ]] || die "A nologin shell is required for the service account."
 
   if ! getent group "$SERVICE_GROUP" >/dev/null; then
     groupadd --system "$SERVICE_GROUP"
@@ -62,10 +67,13 @@ if ! is_test_mode; then
   fi
 fi
 
+install_dir 755 root root "$APP_ROOT"
+install_dir 755 root root "$RELEASES_DIR"
 install_dir 700 "$SERVICE_USER" "$SERVICE_GROUP" "$DATA_DIR"
 install_dir 750 root "$SERVICE_GROUP" "$CONFIG_DIR"
-install_dir 755 root root "$RELEASES_DIR"
 install_dir 700 root root "$BACKUP_DIR"
+verify_dir_security "$APP_ROOT" 755 root root
+verify_dir_security "$RELEASES_DIR" 755 root root
 verify_dir_security "$DATA_DIR" 700 "$SERVICE_USER" "$SERVICE_GROUP"
 verify_dir_security "$CONFIG_DIR" 750 root "$SERVICE_GROUP"
 verify_dir_security "$BACKUP_DIR" 700 root root
@@ -87,7 +95,8 @@ verify_file_security "$CONFIG_DIR/bot.env" 640 root "$SERVICE_GROUP"
 grep -Eq '^DISCORD_TOKEN=[^[:space:]].+$' "$CONFIG_DIR/bot.env" || die "DISCORD_TOKEN is missing in $CONFIG_DIR/bot.env"
 
 old_release=""
-if old_release="$(resolve_current_release "$APP_ROOT")"; then
+if [[ -e "$CURRENT_LINK" || -L "$CURRENT_LINK" ]]; then
+  old_release="$(resolve_current_release "$APP_ROOT")" || die "Existing current release is invalid."
   log "Existing managed release detected: $old_release"
 fi
 
@@ -172,7 +181,8 @@ rollback_install() {
 cleanup_install() {
   local rc=$?
   set +e
-  remove_stale_transition_link "${CURRENT_LINK}.new.$$" 2>/dev/null
+  if [[ -L "$APP_ROOT/current.new" ]]; then rm -f -- "$APP_ROOT/current.new"; fi
+  if [[ -L "${CURRENT_LINK}.new.$$" ]]; then rm -f -- "${CURRENT_LINK}.new.$$"; fi
   if [[ -d "$staging_dir" ]]; then
     safe_remove_tree "$staging_dir" "$RELEASES_DIR" 2>/dev/null
   fi
@@ -227,7 +237,9 @@ switched=1
 
 systemctl restart "$APP"
 if ! wait_for_readiness "$release_dir" "$DATA_FILE"; then
-  systemctl status "$APP" --no-pager -l >&2 || :
+  if ! systemctl status "$APP" --no-pager -l >&2; then
+    log "systemctl status was unavailable while reporting readiness failure."
+  fi
   die "New release did not become ready within the configured readiness window."
 fi
 
@@ -242,6 +254,13 @@ verify_file_security "$DATA_FILE" 600 "$SERVICE_USER" "$SERVICE_GROUP"
 verify_dir_security "$DATA_DIR" 700 "$SERVICE_USER" "$SERVICE_GROUP"
 verify_dir_security "$BACKUP_DIR" 700 root root
 verify_file_security "$CONFIG_DIR/bot.env" 640 root "$SERVICE_GROUP"
+
+sentinel_tmp="$APP_ROOT/.managed-install.new.$$"
+printf '%s\n' "$APP" > "$sentinel_tmp"
+chmod 600 "$sentinel_tmp"
+if ! is_test_mode; then chown root:root "$sentinel_tmp"; fi
+mv -f -- "$sentinel_tmp" "$SENTINEL"
+verify_file_security "$SENTINEL" 600 root root
 
 install_succeeded=1
 transaction_started=0
