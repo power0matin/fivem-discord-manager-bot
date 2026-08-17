@@ -55,8 +55,7 @@ if [[ -f "$DATA_FILE" ]]; then
   log "Verified pre-update backup: $backup_file"
 fi
 
-install_rc=0
-if ! SKIP_PREINSTALL_BACKUP=1 \
+if SKIP_PREINSTALL_BACKUP=1 \
   SOURCE_DIR="$SOURCE_DIR" \
   APP_ROOT="$APP_ROOT" \
   DATA_DIR="$DATA_DIR" \
@@ -73,6 +72,8 @@ if ! SKIP_PREINSTALL_BACKUP=1 \
   DEPLOY_HEALTHCHECK_HELPER="${DEPLOY_HEALTHCHECK_HELPER:-}" \
   RELEASE_ID="${RELEASE_ID:-}" \
   bash "$SOURCE_DIR/scripts/install.sh"; then
+  install_rc=0
+else
   install_rc=$?
 fi
 
@@ -121,4 +122,6 @@ if ! wait_for_readiness "$new_release" "$DATA_FILE"; then
 fi
 
 printf 'Update successful.\nPrevious release: %s\nCurrent release: %s\n' "$old_release" "$new_release"
-[[ -n "$backup_file" ]] && printf 'Verified pre-update backup: %s\n' "$backup_file"
+if [[ -n "$backup_file" ]]; then
+  printf 'Verified pre-update backup: %s\n' "$backup_file"
+fi
