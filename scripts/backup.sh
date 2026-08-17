@@ -4,7 +4,7 @@ set -Eeuo pipefail
 DATA_FILE="${DATA_FILE:-/var/lib/fivem-discord-manager-bot/data.json}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/fivem-discord-manager-bot}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-BACKUP_FILE="$BACKUP_DIR/data-$STAMP.json"
+BACKUP_FILE="$BACKUP_DIR/data-$STAMP-$$.json"
 
 [[ -f "$DATA_FILE" ]] || { echo "Data file not found: $DATA_FILE" >&2; exit 1; }
 mkdir -p "$BACKUP_DIR"
