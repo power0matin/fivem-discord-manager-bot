@@ -4,21 +4,11 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { spawn } = require("node:child_process");
 const { createDeployHarness } = require("./helpers/deploy-harness");
 
 async function mode(file) {
   return (await fs.stat(file)).mode & 0o777;
-}
-
-function waitForExit(child) {
-  return new Promise((resolve, reject) => {
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.on("error", reject);
-    child.on("close", (status) => resolve({ status, stdout, stderr }));
-  });
 }
 
 test("first install creates a managed, permission-checked release and is rerunnable", async () => {
@@ -33,7 +23,10 @@ test("first install creates a managed, permission-checked release and is rerunna
     assert.equal(await mode(path.join(h.configDir, "bot.env")), 0o640);
     assert.equal(await mode(path.join(h.dataDir, "data.json")), 0o600);
     assert.equal(await mode(path.join(h.appRoot, ".managed-install")), 0o600);
-    assert.equal((await fs.readFile(path.join(h.appRoot, ".managed-install"), "utf8")).trim(), "fivem-discord-manager-bot");
+    assert.equal(
+      (await fs.readFile(path.join(h.appRoot, ".managed-install"), "utf8")).trim(),
+      "fivem-discord-manager-bot"
+    );
 
     const firstData = await h.readData();
     result = h.runScript("install.sh", [], { RELEASE_ID: "release-two" });
@@ -198,11 +191,8 @@ test("stale lock file without a holder does not block an update", async () => {
 
 test("concurrent updater cannot acquire the held deployment lock and succeeds after release", async () => {
   const h = await createDeployHarness({ existing: true });
-  let holder;
   try {
-    holder = h.spawnScript("../node_modules/.bin/does-not-exist", []);
-    holder.kill();
-    const lockHolder = require("node:child_process").spawn("flock", [h.lockFile, "sleep", "0.4"], {
+    const lockHolder = spawn("flock", [h.lockFile, "sleep", "0.4"], {
       env: h.env,
       stdio: "ignore",
     });
@@ -214,14 +204,16 @@ test("concurrent updater cannot acquire the held deployment lock and succeeds af
 
     await new Promise((resolve, reject) => {
       lockHolder.on("error", reject);
-      lockHolder.on("close", resolve);
+      lockHolder.on("close", (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`lock holder exited with ${code}`));
+      });
     });
 
     result = h.runScript("update.sh", [], { RELEASE_ID: "release-after-lock" });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(path.basename(await h.currentRelease()), "release-after-lock");
   } finally {
-    if (holder && !holder.killed) holder.kill();
     await h.cleanup();
   }
 });
