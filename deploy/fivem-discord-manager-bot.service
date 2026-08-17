@@ -1,0 +1,27 @@
+[Unit]
+Description=FiveM Discord Manager Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fivembot
+Group=fivembot
+WorkingDirectory=/opt/fivem-discord-manager-bot/current
+EnvironmentFile=/etc/fivem-discord-manager-bot/bot.env
+Environment=NODE_ENV=production
+Environment=DATA_FILE=/var/lib/fivem-discord-manager-bot/data.json
+ExecStart=/usr/bin/node src/index.js
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fivem-discord-manager-bot
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
