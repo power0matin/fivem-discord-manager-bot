@@ -8,14 +8,15 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "test": "node --test",
+    "lint": "node scripts/lint.js",
     "check:syntax": "node scripts/check-syntax.js",
-    "verify": "npm run check:syntax && npm test",
+    "verify": "npm run lint && npm run check:syntax && npm test",
     "slash:register": "node src/modules/stream-notifier/slash/register.js",
     "slash:list": "node src/modules/stream-notifier/slash/list-commands.js",
     "slash:purge": "node src/modules/stream-notifier/slash/purge-commands.js"
   },
   "engines": {
-    "node": ">=18.17"
+    "node": ">=22"
   },
   "dependencies": {
     "axios": "^1.18.1",

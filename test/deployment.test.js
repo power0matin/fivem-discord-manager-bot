@@ -6,6 +6,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { createDeployHarness } = require("./helpers/deploy-harness");
 
 const root = path.resolve(__dirname, "..");
 
@@ -39,27 +40,20 @@ test("healthcheck distinguishes ready and stale runtime state", async () => {
 });
 
 test("backup and restore round-trip preserves database", async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "fivem-backup-"));
-  const data = path.join(dir, "data.json");
-  const backups = path.join(dir, "backups");
-  const original = { schemaVersion: 1, settings: { keywordRegex: "original" }, state: { lastTickAt: 123 } };
+  const h = await createDeployHarness({ existing: true });
   try {
-    await fs.writeFile(data, JSON.stringify(original));
-    const backup = run("bash", ["scripts/backup.sh"], { DATA_FILE: data, BACKUP_DIR: backups });
+    const original = await h.readData();
+    const backup = h.runScript("backup.sh");
     assert.equal(backup.status, 0, backup.stderr);
     const backupFile = backup.stdout.trim();
-    assert.ok(backupFile.startsWith(backups));
+    assert.ok(backupFile.startsWith(h.backupDir));
 
-    await fs.writeFile(data, JSON.stringify({ changed: true }));
-    const restore = run("bash", ["scripts/restore.sh", backupFile], {
-      DATA_FILE: data,
-      BACKUP_DIR: backups,
-      SERVICE_NAME: "definitely-not-a-real-service",
-    });
+    await fs.writeFile(h.dataFile, JSON.stringify({ schemaVersion: 1, changed: true, state: { lastTickAt: 1 } }));
+    const restore = h.runScript("restore.sh", [backupFile]);
     assert.equal(restore.status, 0, restore.stderr);
-    assert.deepEqual(JSON.parse(await fs.readFile(data, "utf8")), original);
+    assert.deepEqual(await h.readData(), original);
   } finally {
-    await fs.rm(dir, { recursive: true, force: true });
+    await h.cleanup();
   }
 });
 

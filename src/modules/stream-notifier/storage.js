@@ -1,6 +1,7 @@
 "use strict";
 
-const fs = require("node:fs/promises");
+const realFs = require("node:fs/promises");
+let fs = realFs;
 const path = require("node:path");
 const crypto = require("node:crypto");
 
@@ -165,7 +166,21 @@ const DEFAULT_DB = {
 
 let canonicalDb = null;
 let loadPromise = null;
-let writeTail = Promise.resolve();
+let writerPromise = null;
+let pendingSnapshot = null;
+let pendingBackupRequired = false;
+let pendingDeferred = null;
+let lastWriteError = null;
+
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 function cloneDefault() {
   return structuredClone(DEFAULT_DB);
@@ -329,21 +344,76 @@ async function writeAtomically(db, { createBackup = true } = {}) {
 
     await fs.rename(tmpPath, DB_PATH);
   } catch (err) {
-    if (handle) await handle.close().catch(() => {});
-    await fs.unlink(tmpPath).catch(() => {});
+    if (handle) {
+      try {
+        await handle.close();
+      } catch (cleanupErr) {
+        console.error("[Storage] Failed to close temporary persistence file:", cleanupErr?.message ?? cleanupErr);
+      }
+    }
+    try {
+      await fs.unlink(tmpPath);
+    } catch (cleanupErr) {
+      if (cleanupErr?.code !== "ENOENT") {
+        console.error("[Storage] Failed to remove temporary persistence file:", cleanupErr?.message ?? cleanupErr);
+      }
+    }
     throw err;
   }
 }
 
-async function saveDb(db, options) {
+function startWriter() {
+  if (writerPromise) return writerPromise;
+
+  writerPromise = (async () => {
+    while (pendingSnapshot) {
+      const snapshot = pendingSnapshot;
+      const createBackup = pendingBackupRequired;
+      const deferred = pendingDeferred;
+
+      pendingSnapshot = null;
+      pendingBackupRequired = false;
+      pendingDeferred = null;
+
+      try {
+        await writeAtomically(snapshot, { createBackup });
+        lastWriteError = null;
+        deferred.resolve();
+      } catch (err) {
+        lastWriteError = err;
+        deferred.reject(err);
+      }
+    }
+  })().finally(() => {
+    writerPromise = null;
+    if (pendingSnapshot) startWriter();
+  });
+
+  return writerPromise;
+}
+
+function saveDb(db, options = {}) {
   const target = replaceCanonical(db);
-  const operation = writeTail.then(() => writeAtomically(target, options));
-  writeTail = operation.catch(() => {});
-  return operation;
+  const snapshot = structuredClone(target);
+  const backupRequired = options.createBackup !== false;
+
+  if (pendingSnapshot) {
+    pendingSnapshot = snapshot;
+    pendingBackupRequired = pendingBackupRequired || backupRequired;
+    return pendingDeferred.promise;
+  }
+
+  pendingSnapshot = snapshot;
+  pendingBackupRequired = backupRequired;
+  pendingDeferred = createDeferred();
+  const promise = pendingDeferred.promise;
+  startWriter();
+  return promise;
 }
 
 async function flushDb() {
-  await writeTail;
+  while (writerPromise) await writerPromise;
+  if (lastWriteError) throw lastWriteError;
 }
 
 async function restoreBackup() {
@@ -353,10 +423,28 @@ async function restoreBackup() {
   return canonicalDb;
 }
 
+function setFsForTests(overrides = {}) {
+  fs = { ...realFs, ...overrides };
+}
+
+function getQueueState() {
+  return {
+    writerRunning: Boolean(writerPromise),
+    hasPendingSnapshot: Boolean(pendingSnapshot),
+    hasPendingPromise: Boolean(pendingDeferred),
+    lastWriteError: lastWriteError?.message || null,
+  };
+}
+
 function resetForTests() {
   canonicalDb = null;
   loadPromise = null;
-  writeTail = Promise.resolve();
+  writerPromise = null;
+  pendingSnapshot = null;
+  pendingBackupRequired = false;
+  pendingDeferred = null;
+  lastWriteError = null;
+  fs = realFs;
 }
 
 module.exports = {
@@ -369,5 +457,7 @@ module.exports = {
   DEFAULT_DB,
   SCHEMA_VERSION,
   _mergeDb: mergeDb,
+  _setFsForTests: setFsForTests,
+  _getQueueState: getQueueState,
   _resetForTests: resetForTests,
 };

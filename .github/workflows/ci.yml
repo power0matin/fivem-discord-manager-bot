@@ -11,11 +11,12 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: Node ${{ matrix.node }} verification
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        node: ['18.20.8', '22.x']
+        node: ['22.x', '24.x']
     steps:
       - uses: actions/checkout@v6
         with:
@@ -28,14 +29,50 @@ jobs:
         run: npm ci
       - name: Dependency security gate
         run: npm audit --audit-level=high
-      - name: Syntax and regression tests
+      - name: Lint
+        run: npm run lint
+      - name: Unit and integration tests
+        run: npm test
+      - name: Full verification
         run: npm run verify
-      - name: Diff hygiene
-        run: git diff --check
+      - name: Syntax check
+        run: npm run check:syntax
+      - name: Diff and workspace hygiene
+        run: |
+          git diff --check
+          test -z "$(git status --porcelain)"
+
+  deployment:
+    name: Deployment and recovery verification
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.x'
+          cache: npm
+      - name: Clean install
+        run: npm ci
+      - name: Dependency security gate
+        run: npm audit --audit-level=high
       - name: ShellCheck
         run: |
-          if ! command -v shellcheck >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y shellcheck
-          fi
-          shellcheck scripts/*.sh
+          shellcheck --version
+          shellcheck scripts/*.sh scripts/lib/*.sh
+      - name: Verify systemd unit syntax
+        run: systemd-analyze verify deploy/fivem-discord-manager-bot.service
+      - name: Deployment, backup, restore and systemd tests
+        run: >-
+          node --test
+          test/deployment.test.js
+          test/deployment-transaction.test.js
+          test/backup-restore-hardening.test.js
+          test/systemd-unit.test.js
+      - name: Persistence stress tests
+        run: node --test test/storage-stress.test.js
+      - name: Diff and workspace hygiene
+        run: |
+          git diff --check
+          test -z "$(git status --porcelain)"

@@ -18,6 +18,20 @@ const EPHEMERAL_FLAG = MessageFlagsBitField?.Flags?.Ephemeral ?? 1 << 6;
 const recentJoins = new Map(); // guildId -> [{ userId, joinedAt }]
 const ANTI_RAID_WINDOW_MS = 60_000; // 1 minute window
 
+async function kickMemberForAntiRaid(member) {
+  if (!member?.kickable) {
+    console.error(`[Welcome] Anti-raid could not kick ${member?.id || "unknown"}: member is not kickable`);
+    return false;
+  }
+  try {
+    await member.kick("Anti-raid: too many recent joins");
+    return true;
+  } catch (err) {
+    console.error(`[Welcome] Anti-raid kick failed for ${member.id}:`, err?.message ?? err);
+    return false;
+  }
+}
+
 function toFlagsPayload(payload) {
   if (!payload || typeof payload !== "object") return payload;
 
@@ -219,20 +233,7 @@ async function sendWelcome(ctx, member, opts = {}) {
       const threshold = s.antiRaidThreshold || 5;
       if (filtered.length >= threshold) {
         // Raid detected: only report success after Discord confirms the kick.
-        if (!member.kickable) {
-          console.error(`[Welcome] Anti-raid could not kick ${member.id}: member is not kickable`);
-          return;
-        }
-
-        const kicked = await member
-          .kick("Anti-raid: too many recent joins")
-          .then(() => true)
-          .catch((err) => {
-            console.error(`[Welcome] Anti-raid kick failed for ${member.id}:`, err?.message ?? err);
-            return false;
-          });
-
-        if (!kicked) return;
+        if (!(await kickMemberForAntiRaid(member))) return;
 
         if (s.logChannelId) {
           const logCh = await ctx.client.channels.fetch(s.logChannelId).catch(() => null);
@@ -877,4 +878,9 @@ function register(ctx) {
 module.exports = {
   register,
   handleInteraction,
+  _test: {
+    kickMemberForAntiRaid,
+    sendWelcome,
+    updateServerStats,
+  },
 };
