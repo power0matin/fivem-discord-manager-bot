@@ -25,6 +25,11 @@ function installProcessGuards() {
     });
   }
 
+  process.prependListener("unhandledRejection", (reason) => {
+    console.error("[Fatal:UnhandledRejection]", reason);
+    gracefulShutdown("unhandledRejection", 1).finally(() => process.exit(1));
+  });
+
   process.prependListener("uncaughtException", (err) => {
     console.error("[Fatal:UncaughtException]", err);
     gracefulShutdown("uncaughtException", 1).finally(() => process.exit(1));
