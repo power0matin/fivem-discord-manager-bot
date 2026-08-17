@@ -344,8 +344,20 @@ async function writeAtomically(db, { createBackup = true } = {}) {
 
     await fs.rename(tmpPath, DB_PATH);
   } catch (err) {
-    if (handle) await handle.close().catch(() => {});
-    await fs.unlink(tmpPath).catch(() => {});
+    if (handle) {
+      try {
+        await handle.close();
+      } catch (cleanupErr) {
+        console.error("[Storage] Failed to close temporary persistence file:", cleanupErr?.message ?? cleanupErr);
+      }
+    }
+    try {
+      await fs.unlink(tmpPath);
+    } catch (cleanupErr) {
+      if (cleanupErr?.code !== "ENOENT") {
+        console.error("[Storage] Failed to remove temporary persistence file:", cleanupErr?.message ?? cleanupErr);
+      }
+    }
     throw err;
   }
 }
