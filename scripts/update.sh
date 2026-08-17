@@ -18,7 +18,7 @@ old_release="$(readlink -f "$APP_ROOT/current")"
 
 backup=""
 if [[ -f "$DATA_DIR/data.json" ]]; then
-  backup="$(DATA_FILE="$DATA_DIR/data.json" BACKUP_DIR="/var/backups/$APP" "$old_release/scripts/backup.sh")"
+  backup="$(DATA_FILE="$DATA_DIR/data.json" BACKUP_DIR="/var/backups/$APP" bash "$old_release/scripts/backup.sh")"
 fi
 
 rollback() {
@@ -29,7 +29,7 @@ rollback() {
 }
 trap rollback ERR
 
-SOURCE_DIR="$SOURCE_DIR" APP_ROOT="$APP_ROOT" DATA_DIR="$DATA_DIR" CONFIG_DIR="/etc/$APP" "$SOURCE_DIR/scripts/install.sh"
+SOURCE_DIR="$SOURCE_DIR" APP_ROOT="$APP_ROOT" DATA_DIR="$DATA_DIR" CONFIG_DIR="/etc/$APP" bash "$SOURCE_DIR/scripts/install.sh"
 
 DATA_FILE="$DATA_DIR/data.json" node "$APP_ROOT/current/scripts/healthcheck.js"
 trap - ERR
