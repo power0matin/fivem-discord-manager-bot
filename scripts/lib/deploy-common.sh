@@ -8,6 +8,7 @@ SERVICE_GROUP="${SERVICE_GROUP:-fivembot}"
 DEPLOY_LOCK_FILE="${DEPLOY_LOCK_FILE:-/run/lock/${APP}-deploy.lock}"
 READINESS_ATTEMPTS="${READINESS_ATTEMPTS:-30}"
 READINESS_INTERVAL_SECONDS="${READINESS_INTERVAL_SECONDS:-2}"
+SYSTEMD_PATH="${SYSTEMD_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
 
 log() {
   printf '[deploy] %s\n' "$*"
@@ -51,6 +52,18 @@ validate_node_version() {
     const [major] = process.versions.node.split(".").map(Number);
     if (!Number.isInteger(major) || major < 22) process.exit(1);
   ' || die "Node.js >=22 LTS is required; found $(node -v 2>/dev/null || echo unknown)."
+
+  if ! is_test_mode; then
+    require_command readlink
+    local node_command node_path node_from_systemd_path
+    node_command="$(command -v node)"
+    node_path="$(readlink -f "$node_command")"
+    node_from_systemd_path="$(PATH="$SYSTEMD_PATH" command -v node || true)"
+    [[ -n "$node_from_systemd_path" ]] || \
+      die "Production service requires Node.js 22+ installed system-wide in $SYSTEMD_PATH; current node is $node_path. User-local/nvm runtimes are unsupported."
+    [[ "$(readlink -f "$node_from_systemd_path")" == "$node_path" ]] || \
+      die "Interactive Node ($node_path) differs from the systemd service Node ($(readlink -f "$node_from_systemd_path")). Install/select one system-wide Node.js 22+ runtime before deployment."
+  fi
 }
 
 validate_positive_int() {
