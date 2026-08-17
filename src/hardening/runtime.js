@@ -90,5 +90,7 @@ function installRuntimeHardening() {
 
 module.exports = {
   installRuntimeHardening,
+  installProcessGuards,
+  installDiscordGuards,
   gracefulShutdown,
 };
