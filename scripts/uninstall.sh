@@ -2,33 +2,51 @@
 set -Eeuo pipefail
 
 APP="fivem-discord-manager-bot"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_ROOT="${APP_ROOT:-/opt/$APP}"
 DATA_DIR="${DATA_DIR:-/var/lib/$APP}"
 CONFIG_DIR="${CONFIG_DIR:-/etc/$APP}"
+SERVICE_FILE="${SERVICE_FILE:-/etc/systemd/system/$APP.service}"
+SENTINEL="$APP_ROOT/.managed-install"
 PURGE_DATA=false
 [[ "${1:-}" == "--purge-data" ]] && PURGE_DATA=true
 
-[[ ${EUID:-$(id -u)} -eq 0 ]] || { echo "Run uninstaller as root." >&2; exit 1; }
+# shellcheck source=scripts/lib/deploy-common.sh
+source "$SCRIPT_DIR/lib/deploy-common.sh"
 
-safe_exact_path() {
-  local value="$1" expected="$2"
-  [[ "$value" == "$expected" ]] || { echo "Refusing unsafe path: $value (expected $expected)" >&2; exit 1; }
-}
+require_root
+require_supported_platform
+acquire_deploy_lock
 
-safe_exact_path "$APP_ROOT" "/opt/$APP"
-safe_exact_path "$DATA_DIR" "/var/lib/$APP"
-safe_exact_path "$CONFIG_DIR" "/etc/$APP"
+if ! is_test_mode; then
+  [[ "$APP_ROOT" == "/opt/$APP" ]] || die "Refusing non-default APP_ROOT in production uninstall: $APP_ROOT"
+  [[ "$DATA_DIR" == "/var/lib/$APP" ]] || die "Refusing non-default DATA_DIR in production uninstall: $DATA_DIR"
+  [[ "$CONFIG_DIR" == "/etc/$APP" ]] || die "Refusing non-default CONFIG_DIR in production uninstall: $CONFIG_DIR"
+  [[ "$SERVICE_FILE" == "/etc/systemd/system/$APP.service" ]] || die "Refusing non-default service path in production uninstall: $SERVICE_FILE"
+else
+  assert_safe_absolute_dir "$APP_ROOT" APP_ROOT
+  assert_safe_absolute_dir "$DATA_DIR" DATA_DIR
+  assert_safe_absolute_dir "$CONFIG_DIR" CONFIG_DIR
+fi
 
-systemctl disable --now "$APP" 2>/dev/null || true
-rm -f "/etc/systemd/system/$APP.service"
+[[ -f "$SENTINEL" ]] || die "Managed-install sentinel is missing; refusing destructive uninstall: $SENTINEL"
+grep -Fxq "$APP" "$SENTINEL" || die "Managed-install sentinel does not match this application."
+
+if systemctl cat "$APP" >/dev/null 2>&1; then
+  systemctl disable --now "$APP"
+fi
+
+if [[ -f "$SERVICE_FILE" ]]; then rm -f -- "$SERVICE_FILE"; fi
 systemctl daemon-reload
 
-rm -rf --one-file-system "$APP_ROOT"
-rm -rf --one-file-system "$CONFIG_DIR"
+safe_remove_tree "$APP_ROOT" "$(dirname "$APP_ROOT")"
+safe_remove_tree "$CONFIG_DIR" "$(dirname "$CONFIG_DIR")"
 
 if $PURGE_DATA; then
-  rm -rf --one-file-system "$DATA_DIR"
-  echo "Application, configuration and data removed. Backups under /var/backups/$APP were preserved."
+  if [[ -d "$DATA_DIR" ]]; then safe_remove_tree "$DATA_DIR" "$(dirname "$DATA_DIR")"; fi
+  if ! is_test_mode && id -u "$SERVICE_USER" >/dev/null 2>&1; then userdel "$SERVICE_USER"; fi
+  if ! is_test_mode && getent group "$SERVICE_GROUP" >/dev/null 2>&1; then groupdel "$SERVICE_GROUP"; fi
+  printf 'Application, configuration and data removed. Backups under /var/backups/%s were preserved.\n' "$APP"
 else
-  echo "Application and configuration removed. Data preserved at $DATA_DIR."
+  printf 'Application and configuration removed. Data and service account preserved at %s.\n' "$DATA_DIR"
 fi
