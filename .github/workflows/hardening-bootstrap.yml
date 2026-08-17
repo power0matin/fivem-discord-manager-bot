@@ -21,26 +21,31 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
 
-      - name: Apply deterministic source hardening
-        run: node scripts/apply-hardening.js
-
-      - name: Syntax-check modified runtime files
+      - name: Apply remaining deterministic hardening
         run: |
-          node --check src/modules/welcome/index.js
-          node --check src/modules/fivem/index.js
-          node --check src/modules/tickets/index.js
-          node --check src/modules/stream-notifier/index.js
-          node --check src/modules/stream-notifier/slash/setup.js
+          if grep -q 'async function createTicketUnlocked' src/modules/tickets/index.js; then
+            echo 'Second hardening patch already applied.'
+          else
+            node scripts/apply-hardening-2.js
+          fi
 
-      - name: Commit patched source
+      - name: Refresh lockfile and verify clean install
         run: |
-          if git diff --quiet; then
-            echo 'No source changes to commit.'
+          npm install --package-lock-only --ignore-scripts
+          npm ci
+          npm run verify
+          npm audit --audit-level=high
+
+      - name: Commit generated changes
+        run: |
+          if git diff --quiet -- src package-lock.json; then
+            echo 'No generated changes to commit.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/
-          git commit -m 'fix: apply production runtime hardening [skip ci]'
+          git add src package-lock.json
+          git commit -m 'fix: complete runtime hardening and refresh lockfile [skip ci]'
           git push origin HEAD:agent/production-hardening
