@@ -22,6 +22,9 @@
     "discord.js": "^14.27.0",
     "dotenv": "^16.6.1"
   },
+  "overrides": {
+    "ws": "8.21.1"
+  },
   "license": "MIT",
   "keywords": [
     "discord",
