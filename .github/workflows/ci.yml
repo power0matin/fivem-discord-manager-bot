@@ -10,63 +10,32 @@ permissions:
   contents: read
 
 jobs:
-  hardening-bootstrap:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'agent/production-hardening' && github.event.pull_request.head.repo.full_name == github.repository
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-
-      - name: Apply remaining reviewed hardening patch set
-        run: |
-          if grep -q 'async function createTicketUnlocked' src/modules/tickets/index.js; then
-            echo 'Second hardening patch set already applied.'
-          else
-            node scripts/apply-hardening-2.js
-          fi
-
-      - name: Refresh lockfile within declared compatible ranges
-        run: npm install --package-lock-only --ignore-scripts
-
-      - name: Clean install and verification
-        run: |
-          npm ci
-          npm run verify
-          npm audit --audit-level=high
-
-      - name: Persist generated source and lockfile
-        run: |
-          if git diff --quiet -- src package-lock.json; then
-            echo 'No generated changes to commit.'
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src package-lock.json
-          git commit -m 'fix: complete runtime hardening and refresh lockfile'
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
-
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         node: ['18.20.8', '22.x']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: npm ci
-      - run: npm run verify
-      - run: npm audit --audit-level=high
+      - name: Clean install
+        run: npm ci
+      - name: Dependency security gate
+        run: npm audit --audit-level=high
+      - name: Syntax and regression tests
+        run: npm run verify
+      - name: Diff hygiene
+        run: git diff --check
+      - name: ShellCheck
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y shellcheck
+          fi
+          shellcheck scripts/*.sh
