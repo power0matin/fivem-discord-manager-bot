@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 SERVICE="${SERVICE_NAME:-fivem-discord-manager-bot}"
 DATA_FILE="${DATA_FILE:-/var/lib/fivem-discord-manager-bot/data.json}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/fivem-discord-manager-bot}"
 BACKUP_FILE="${1:-}"
 
 [[ -n "$BACKUP_FILE" && -f "$BACKUP_FILE" ]] || { echo "Usage: $0 /path/to/data-backup.json" >&2; exit 2; }
@@ -13,20 +14,23 @@ fi
 
 install -d -m 700 "$(dirname "$DATA_FILE")"
 if [[ -f "$DATA_FILE" ]]; then
-  DATA_FILE="$DATA_FILE" "$(dirname "$0")/backup.sh" >/dev/null
+  DATA_FILE="$DATA_FILE" BACKUP_DIR="$BACKUP_DIR" bash "$(dirname "$0")/backup.sh" >/dev/null
 fi
 
+service_managed=false
 if command -v systemctl >/dev/null 2>&1 && systemctl cat "$SERVICE" >/dev/null 2>&1; then
+  service_managed=true
   systemctl stop "$SERVICE"
 fi
 
 tmp="${DATA_FILE}.restore.$$"
-trap 'rm -f "$tmp"' EXIT
+cleanup() { rm -f "$tmp"; }
+trap cleanup EXIT
 install -m 600 "$BACKUP_FILE" "$tmp"
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));' "$tmp"
 mv -f "$tmp" "$DATA_FILE"
 
-if command -v systemctl >/dev/null 2>&1 && systemctl cat "$SERVICE" >/dev/null 2>&1; then
+if $service_managed; then
   systemctl start "$SERVICE"
 fi
 
