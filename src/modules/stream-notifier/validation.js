@@ -1,14 +1,7 @@
 "use strict";
 
-/**
- * Shared validation + normalization helpers used by both
- * prefix commands (src/index.js) and slash setup (src/slash/setup.js).
- */
-
 function normalizeName(s) {
-  return String(s ?? "")
-    .trim()
-    .toLowerCase();
+  return String(s ?? "").trim().toLowerCase();
 }
 
 function safeStr(v) {
@@ -22,20 +15,34 @@ function clampInt(n, min, max, fallback) {
 }
 
 function parseOnOff(value) {
-  const v = String(value ?? "")
-    .trim()
-    .toLowerCase();
-  if (["1", "true", "yes", "y", "on", "enable", "enabled"].includes(v))
-    return true;
-  if (["0", "false", "no", "n", "off", "disable", "disabled"].includes(v))
-    return false;
+  const v = String(value ?? "").trim().toLowerCase();
+  if (["1", "true", "yes", "y", "on", "enable", "enabled"].includes(v)) return true;
+  if (["0", "false", "no", "n", "off", "disable", "disabled"].includes(v)) return false;
   return null;
 }
 
-function compileRegexOrFallback(pattern, fallback = /nox\\s*rp/i) {
+function unsafeRegexReason(pattern) {
   const p = String(pattern ?? "").trim();
-  if (!p) return fallback;
-  if (p.length > 200) return fallback;
+  if (p.length > 200) return "Regex is too long (max 200 chars).";
+
+  // Reject common catastrophic-backtracking shapes such as (a+)+, (.*)* and (x{1,3})+.
+  // This deliberately favors predictable event-loop latency over accepting every JS regex.
+  const nestedQuantifier = /\((?:\\.|[^()])*?(?:\+|\*|\{\d+(?:,\d*)?\})(?:\\.|[^()])*?\)\s*(?:\+|\*|\{\d+(?:,\d*)?\})/;
+  if (nestedQuantifier.test(p)) {
+    return "Regex contains nested quantifiers that can block the event loop.";
+  }
+
+  // Backreferences combined with unbounded repetition are another high-risk construct.
+  if (/\\[1-9]/.test(p) && /[+*]/.test(p)) {
+    return "Regex combines backreferences with unbounded repetition.";
+  }
+
+  return null;
+}
+
+function compileRegexOrFallback(pattern, fallback = /nox\s*rp/i) {
+  const p = String(pattern ?? "").trim();
+  if (!p || unsafeRegexReason(p)) return fallback;
   try {
     return new RegExp(p, "i");
   } catch {
@@ -45,8 +52,7 @@ function compileRegexOrFallback(pattern, fallback = /nox\\s*rp/i) {
 
 function compileRegexOrNull(pattern) {
   const p = String(pattern ?? "").trim();
-  if (!p) return null;
-  if (p.length > 200) return null;
+  if (!p || unsafeRegexReason(p)) return null;
   try {
     return new RegExp(p, "i");
   } catch {
@@ -57,10 +63,11 @@ function compileRegexOrNull(pattern) {
 function validateRegexPattern(pattern) {
   const p = String(pattern ?? "").trim();
   if (!p) return { ok: false, error: "Regex cannot be empty." };
-  if (p.length > 200)
-    return { ok: false, error: "Regex is too long (max 200 chars)." };
+
+  const unsafe = unsafeRegexReason(p);
+  if (unsafe) return { ok: false, error: unsafe };
+
   try {
-    // eslint-disable-next-line no-new
     new RegExp(p, "i");
     return { ok: true };
   } catch (err) {
@@ -76,4 +83,5 @@ module.exports = {
   compileRegexOrFallback,
   compileRegexOrNull,
   validateRegexPattern,
+  unsafeRegexReason,
 };
