@@ -48,12 +48,24 @@ if systemctl cat "$SERVICE_NAME" >/dev/null 2>&1; then
   fi
 fi
 
+service_stopped_for_restore=0
+if (( service_present == 1 && service_was_active == 1 )); then
+  systemctl stop "$SERVICE_NAME"
+  service_stopped_for_restore=1
+fi
+
 had_original=0
 safety_backup=""
 if [[ -f "$DATA_FILE" ]]; then
   had_original=1
-  safety_backup="$(DATA_FILE="$DATA_FILE" BACKUP_DIR="$BACKUP_DIR" DEPLOY_TEST_MODE="$DEPLOY_TEST_MODE" SERVICE_USER="$SERVICE_USER" SERVICE_GROUP="$SERVICE_GROUP" bash "$SCRIPT_DIR/backup.sh")"
-  [[ -f "$safety_backup" && -f "$safety_backup.sha256" ]] || die "Failed to create verified pre-restore safety backup."
+  if ! safety_backup="$(DATA_FILE="$DATA_FILE" BACKUP_DIR="$BACKUP_DIR" DEPLOY_TEST_MODE="$DEPLOY_TEST_MODE" SERVICE_USER="$SERVICE_USER" SERVICE_GROUP="$SERVICE_GROUP" bash "$SCRIPT_DIR/backup.sh")"; then
+    if (( service_stopped_for_restore == 1 )); then systemctl start "$SERVICE_NAME"; fi
+    die "Failed to create pre-restore safety backup."
+  fi
+  if [[ ! -f "$safety_backup" || ! -f "$safety_backup.sha256" ]]; then
+    if (( service_stopped_for_restore == 1 )); then systemctl start "$SERVICE_NAME"; fi
+    die "Failed to create verified pre-restore safety backup."
+  fi
 fi
 
 data_dir="$(dirname "$DATA_FILE")"
@@ -125,10 +137,6 @@ node -e '
   const fd = fs.openSync(process.argv[1], "r");
   try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
 ' "$tmp_file"
-
-if (( service_present == 1 && service_was_active == 1 )); then
-  systemctl stop "$SERVICE_NAME"
-fi
 
 mv -f -- "$tmp_file" "$DATA_FILE"
 swapped=1

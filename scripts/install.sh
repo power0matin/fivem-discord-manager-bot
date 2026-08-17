@@ -186,11 +186,11 @@ cleanup_install() {
   if [[ -d "$staging_dir" ]]; then
     safe_remove_tree "$staging_dir" "$RELEASES_DIR" 2>/dev/null
   fi
-  if [[ -n "$service_backup" && -f "$service_backup" ]]; then
-    rm -f -- "$service_backup"
-  fi
   if (( rc != 0 && transaction_started == 1 && install_succeeded == 0 )); then
     rollback_install
+  fi
+  if [[ -n "$service_backup" && -f "$service_backup" ]]; then
+    rm -f -- "$service_backup"
   fi
   return "$rc"
 }
