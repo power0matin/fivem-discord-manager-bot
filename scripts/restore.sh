@@ -49,34 +49,28 @@ if systemctl cat "$SERVICE_NAME" >/dev/null 2>&1; then
 fi
 
 service_stopped_for_restore=0
-if (( service_present == 1 && service_was_active == 1 )); then
-  systemctl stop "$SERVICE_NAME"
-  service_stopped_for_restore=1
-fi
-
 had_original=0
 safety_backup=""
-if [[ -f "$DATA_FILE" ]]; then
-  had_original=1
-  if ! safety_backup="$(DATA_FILE="$DATA_FILE" BACKUP_DIR="$BACKUP_DIR" DEPLOY_TEST_MODE="$DEPLOY_TEST_MODE" SERVICE_USER="$SERVICE_USER" SERVICE_GROUP="$SERVICE_GROUP" bash "$SCRIPT_DIR/backup.sh")"; then
-    if (( service_stopped_for_restore == 1 )); then systemctl start "$SERVICE_NAME"; fi
-    die "Failed to create pre-restore safety backup."
-  fi
-  if [[ ! -f "$safety_backup" || ! -f "$safety_backup.sha256" ]]; then
-    if (( service_stopped_for_restore == 1 )); then systemctl start "$SERVICE_NAME"; fi
-    die "Failed to create verified pre-restore safety backup."
-  fi
-fi
-
 data_dir="$(dirname "$DATA_FILE")"
-if [[ ! -d "$data_dir" ]]; then
-  install_dir 700 "$SERVICE_USER" "$SERVICE_GROUP" "$data_dir"
-fi
-verify_dir_security "$data_dir" 700 "$SERVICE_USER" "$SERVICE_GROUP"
-
-tmp_file="$(mktemp "$data_dir/.restore-XXXXXXXX.json")"
+tmp_file=""
 swapped=0
 restore_succeeded=0
+
+resume_original_service() {
+  local resume_ok=1
+  if (( service_present == 1 && service_was_active == 1 && service_stopped_for_restore == 1 )); then
+    if systemctl start "$SERVICE_NAME"; then
+      if [[ -n "$current_release" && -f "$DATA_FILE" ]] && ! wait_for_readiness "$current_release" "$DATA_FILE"; then
+        resume_ok=0
+      fi
+    else
+      resume_ok=0
+    fi
+  fi
+  if (( resume_ok == 0 )); then
+    printf '[deploy] CRITICAL: restore failed before data replacement and the original service could not be resumed cleanly.\n' >&2
+  fi
+}
 
 rollback_restore() {
   local rollback_ok=1 rollback_tmp=""
@@ -120,14 +114,37 @@ rollback_restore() {
 cleanup_restore() {
   local rc=$?
   set +e
-  if [[ -f "$tmp_file" ]]; then rm -f -- "$tmp_file"; fi
-  if (( rc != 0 && swapped == 1 && restore_succeeded == 0 )); then
-    rollback_restore
+  if [[ -n "$tmp_file" && -f "$tmp_file" ]]; then rm -f -- "$tmp_file"; fi
+  if (( rc != 0 && restore_succeeded == 0 )); then
+    if (( swapped == 1 )); then
+      rollback_restore
+    else
+      resume_original_service
+    fi
   fi
   return "$rc"
 }
 trap cleanup_restore EXIT
 
+if (( service_present == 1 && service_was_active == 1 )); then
+  systemctl stop "$SERVICE_NAME"
+  service_stopped_for_restore=1
+fi
+
+if [[ -f "$DATA_FILE" ]]; then
+  had_original=1
+  safety_backup="$(DATA_FILE="$DATA_FILE" BACKUP_DIR="$BACKUP_DIR" DEPLOY_TEST_MODE="$DEPLOY_TEST_MODE" SERVICE_USER="$SERVICE_USER" SERVICE_GROUP="$SERVICE_GROUP" bash "$SCRIPT_DIR/backup.sh")" || \
+    die "Failed to create pre-restore safety backup."
+  [[ -f "$safety_backup" && -f "$safety_backup.sha256" ]] || \
+    die "Failed to create verified pre-restore safety backup."
+fi
+
+if [[ ! -d "$data_dir" ]]; then
+  install_dir 700 "$SERVICE_USER" "$SERVICE_GROUP" "$data_dir"
+fi
+verify_dir_security "$data_dir" 700 "$SERVICE_USER" "$SERVICE_GROUP"
+
+tmp_file="$(mktemp "$data_dir/.restore-XXXXXXXX.json")"
 cp -- "$BACKUP_FILE" "$tmp_file"
 chmod 600 "$tmp_file"
 if ! is_test_mode; then chown "$SERVICE_USER:$SERVICE_GROUP" "$tmp_file"; fi
@@ -139,6 +156,7 @@ node -e '
 ' "$tmp_file"
 
 mv -f -- "$tmp_file" "$DATA_FILE"
+tmp_file=""
 swapped=1
 verify_file_security "$DATA_FILE" 600 "$SERVICE_USER" "$SERVICE_GROUP"
 node "$SCRIPT_DIR/validate-data.js" "$DATA_FILE"
