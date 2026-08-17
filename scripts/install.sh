@@ -42,6 +42,14 @@ done
 
 acquire_deploy_lock
 
+# A killed installer may leave only staging directories behind. Because this
+# process owns the deployment lock, no live installer can legitimately own them.
+for stale_staging in "$RELEASES_DIR"/.staging-*; do
+  [[ -d "$stale_staging" ]] || continue
+  safe_remove_tree "$stale_staging" "$RELEASES_DIR"
+  log "Removed stale installer staging directory: $stale_staging"
+done
+
 if ! is_test_mode; then
   if command -v nologin >/dev/null 2>&1; then
     nologin_shell="$(command -v nologin)"
