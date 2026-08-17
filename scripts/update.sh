@@ -9,6 +9,10 @@ CONFIG_DIR="${CONFIG_DIR:-/etc/$APP}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/$APP}"
 SERVICE_FILE="${SERVICE_FILE:-/etc/systemd/system/$APP.service}"
 DATA_FILE="$DATA_DIR/data.json"
+INSTALL_SCRIPT="$SOURCE_DIR/scripts/install.sh"
+BACKUP_SCRIPT="$SOURCE_DIR/scripts/backup.sh"
+RESTORE_SCRIPT="$SOURCE_DIR/scripts/restore.sh"
+VALIDATE_DATA_SCRIPT="$SOURCE_DIR/scripts/validate-data.js"
 
 # shellcheck source=scripts/lib/deploy-common.sh
 source "$SOURCE_DIR/scripts/lib/deploy-common.sh"
@@ -31,7 +35,7 @@ if ! is_test_mode; then
   [[ "$SERVICE_FILE" == "/etc/systemd/system/$APP.service" ]] || die "Custom SERVICE_FILE is supported only in DEPLOY_TEST_MODE."
 fi
 
-[[ -f "$SOURCE_DIR/scripts/install.sh" && -f "$SOURCE_DIR/scripts/backup.sh" && -f "$SOURCE_DIR/scripts/restore.sh" ]] || \
+[[ -f "$INSTALL_SCRIPT" && -f "$BACKUP_SCRIPT" && -f "$RESTORE_SCRIPT" && -f "$VALIDATE_DATA_SCRIPT" ]] || \
   die "SOURCE_DIR does not contain the managed deployment scripts."
 
 acquire_deploy_lock
@@ -49,7 +53,7 @@ if [[ -f "$DATA_FILE" ]]; then
     DEPLOY_TEST_MODE="$DEPLOY_TEST_MODE" \
     SERVICE_USER="$SERVICE_USER" \
     SERVICE_GROUP="$SERVICE_GROUP" \
-    bash "$SOURCE_DIR/scripts/backup.sh"
+    bash "$BACKUP_SCRIPT"
   )"
   [[ -f "$backup_file" && -f "$backup_file.sha256" ]] || die "Update aborted: verified pre-update backup was not created."
   log "Verified pre-update backup: $backup_file"
@@ -71,7 +75,7 @@ if SKIP_PREINSTALL_BACKUP=1 \
   READINESS_INTERVAL_SECONDS="$READINESS_INTERVAL_SECONDS" \
   DEPLOY_HEALTHCHECK_HELPER="${DEPLOY_HEALTHCHECK_HELPER:-}" \
   RELEASE_ID="${RELEASE_ID:-}" \
-  bash "$SOURCE_DIR/scripts/install.sh"; then
+  bash "$INSTALL_SCRIPT"; then
   install_rc=0
 else
   install_rc=$?
@@ -104,7 +108,7 @@ if (( install_rc != 0 )); then
       READINESS_ATTEMPTS="$READINESS_ATTEMPTS" \
       READINESS_INTERVAL_SECONDS="$READINESS_INTERVAL_SECONDS" \
       DEPLOY_HEALTHCHECK_HELPER="${DEPLOY_HEALTHCHECK_HELPER:-}" \
-      bash "$SOURCE_DIR/scripts/restore.sh" "$backup_file"
+      bash "$RESTORE_SCRIPT" "$backup_file"
     fi
   fi
 
@@ -116,7 +120,7 @@ fi
 
 new_release="$(resolve_current_release "$APP_ROOT")" || die "Update completed but current release is invalid."
 [[ "$new_release" != "$old_release" ]] || die "Update reported success without switching to a new release."
-node "$SOURCE_DIR/scripts/validate-data.js" "$DATA_FILE"
+node "$VALIDATE_DATA_SCRIPT" "$DATA_FILE"
 if ! wait_for_readiness "$new_release" "$DATA_FILE"; then
   die "Post-update verification failed after installer success."
 fi
