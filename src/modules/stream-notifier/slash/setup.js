@@ -969,7 +969,7 @@ async function handleComponent(interaction, opts = {}) {
         db.state.twitchActiveMessages = {};
       }
 
-      await saveDb(db).catch(() => null);
+      await saveDb(db);
 
       // Notify host process to apply runtime changes immediately (e.g., interval)
       const newChannelId = db.settings?.notifyChannelId || "";

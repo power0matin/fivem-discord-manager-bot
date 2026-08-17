@@ -8,6 +8,7 @@ const {
   ButtonStyle,
   StringSelectMenuBuilder,
   ComponentType,
+  ChannelType,
 } = require("discord.js");
 
 // Discord API ephemeral flag is 1<<6 (=64). Prefer library constant if available.
@@ -217,12 +218,22 @@ async function sendWelcome(ctx, member, opts = {}) {
 
       const threshold = s.antiRaidThreshold || 5;
       if (filtered.length >= threshold) {
-        // Raid detected: kick the user and log
-        await member
-          .kick("Anti-raid: too many recent joins")
-          .catch(() => null);
+        // Raid detected: only report success after Discord confirms the kick.
+        if (!member.kickable) {
+          console.error(`[Welcome] Anti-raid could not kick ${member.id}: member is not kickable`);
+          return;
+        }
 
-        // Log to log channel if configured
+        const kicked = await member
+          .kick("Anti-raid: too many recent joins")
+          .then(() => true)
+          .catch((err) => {
+            console.error(`[Welcome] Anti-raid kick failed for ${member.id}:`, err?.message ?? err);
+            return false;
+          });
+
+        if (!kicked) return;
+
         if (s.logChannelId) {
           const logCh = await ctx.client.channels.fetch(s.logChannelId).catch(() => null);
           if (logCh && "send" in logCh) {
@@ -337,7 +348,7 @@ async function handleInteraction(interaction, ctx) {
   if (sub === "toggle") {
     const enabled = interaction.options.getBoolean("enabled", true);
     s.enabled = Boolean(enabled);
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Welcome is now: **${s.enabled ? "ON" : "OFF"}**`,
@@ -348,7 +359,7 @@ async function handleInteraction(interaction, ctx) {
   if (sub === "set-channel") {
     const ch = interaction.options.getChannel("channel", true);
     s.channelId = ch.id;
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Welcome channel set to <#${ch.id}>`,
@@ -359,7 +370,7 @@ async function handleInteraction(interaction, ctx) {
   if (sub === "set-title") {
     const title = interaction.options.getString("title", true);
     s.embedTitle = String(title).slice(0, 256);
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: "✅ Welcome embed title updated.",
@@ -370,7 +381,7 @@ async function handleInteraction(interaction, ctx) {
   if (sub === "set-message") {
     const tpl = interaction.options.getString("template", true);
     s.embedDescriptionTemplate = String(tpl).slice(0, 1900);
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content:
@@ -391,7 +402,7 @@ async function handleInteraction(interaction, ctx) {
     s.buttons.button2Label = String(label2).slice(0, 80);
     s.buttons.button2Url = String(url2).slice(0, 2048);
 
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: "✅ Welcome buttons updated.",
@@ -405,7 +416,7 @@ async function handleInteraction(interaction, ctx) {
 
     if (clear) {
       s.embedColor = null;
-      await ctx.persistDb().catch(() => null);
+      await ctx.persistDb();
       await safeReply(interaction, {
         ephemeral: true,
         content: "✅ Welcome embed color cleared (theme default).",
@@ -433,7 +444,7 @@ async function handleInteraction(interaction, ctx) {
     }
 
     s.embedColor = `#${cleaned.toUpperCase()}`;
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Welcome embed color set to \`${s.embedColor}\`.`,
@@ -447,7 +458,7 @@ async function handleInteraction(interaction, ctx) {
 
     if (clear) {
       s.bannerImageUrl = null;
-      await ctx.persistDb().catch(() => null);
+      await ctx.persistDb();
       await safeReply(interaction, {
         ephemeral: true,
         content: "✅ Welcome banner image cleared.",
@@ -473,7 +484,7 @@ async function handleInteraction(interaction, ctx) {
     }
 
     s.bannerImageUrl = raw;
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: "✅ Welcome banner image updated.",
@@ -488,7 +499,7 @@ async function handleInteraction(interaction, ctx) {
     s.dmEnabled = Boolean(enabled);
     if (tpl) s.dmTemplate = String(tpl).slice(0, 1900);
 
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Welcome DM is now: **${s.dmEnabled ? "ON" : "OFF"}**${
@@ -504,7 +515,7 @@ async function handleInteraction(interaction, ctx) {
 
     if (clear) {
       s.autoRoleId = null;
-      await ctx.persistDb().catch(() => null);
+      await ctx.persistDb();
       await safeReply(interaction, {
         ephemeral: true,
         content: "✅ Auto-role cleared.",
@@ -521,7 +532,7 @@ async function handleInteraction(interaction, ctx) {
     }
 
     s.autoRoleId = role.id;
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Auto-role set to <@&${role.id}>`,
@@ -568,7 +579,7 @@ async function handleInteraction(interaction, ctx) {
     s.antiRaidEnabled = Boolean(enabled);
     if (threshold) s.antiRaidThreshold = threshold;
 
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Anti-raid is now: **${s.antiRaidEnabled ? "ON" : "OFF"}**${
@@ -585,7 +596,7 @@ async function handleInteraction(interaction, ctx) {
     s.goodbyeEnabled = Boolean(enabled);
     if (ch) s.goodbyeChannelId = ch.id;
 
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Goodbye message is now: **${s.goodbyeEnabled ? "ON" : "OFF"}**${
@@ -609,7 +620,7 @@ async function handleInteraction(interaction, ctx) {
       }
     }
 
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: "✅ Goodbye message updated.",
@@ -624,7 +635,7 @@ async function handleInteraction(interaction, ctx) {
 
     if (clear) {
       s.statsVoiceChannelId = null;
-      await ctx.persistDb().catch(() => null);
+      await ctx.persistDb();
       await safeReply(interaction, {
         ephemeral: true,
         content: "✅ Server stats display disabled.",
@@ -635,7 +646,7 @@ async function handleInteraction(interaction, ctx) {
     if (ch) s.statsVoiceChannelId = ch.id;
     if (format) s.statsFormat = String(format).slice(0, 100);
 
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await updateServerStats(ctx).catch(() => null);
     await safeReply(interaction, {
       ephemeral: true,
@@ -652,7 +663,7 @@ async function handleInteraction(interaction, ctx) {
 
     if (clear) {
       s.logChannelId = null;
-      await ctx.persistDb().catch(() => null);
+      await ctx.persistDb();
       await safeReply(interaction, {
         ephemeral: true,
         content: "✅ Log channel cleared.",
@@ -669,7 +680,7 @@ async function handleInteraction(interaction, ctx) {
     }
 
     s.logChannelId = ch.id;
-    await ctx.persistDb().catch(() => null);
+    await ctx.persistDb();
     await safeReply(interaction, {
       ephemeral: true,
       content: `✅ Log channel set to <#${ch.id}>`,
@@ -781,7 +792,7 @@ async function updateServerStats(ctx) {
       .catch(() => null);
 
     if (!channel) return;
-    if (channel.type !== 4) return; // GuildVoice
+    if (channel.type !== ChannelType.GuildVoice) return;
 
     const totalMembers = guild.memberCount;
     const onlineMembers = guild.members.cache.filter(
