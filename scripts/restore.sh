@@ -13,6 +13,7 @@ BACKUP_FILE="${1:-}"
 source "$SCRIPT_DIR/lib/deploy-common.sh"
 
 require_root
+require_supported_platform
 require_command node
 require_command sha256sum
 require_command mktemp
@@ -22,12 +23,16 @@ assert_safe_absolute_dir "$BACKUP_DIR" BACKUP_DIR
 [[ -n "$BACKUP_FILE" && -f "$BACKUP_FILE" ]] || die "Usage: $0 /path/to/data-backup.json"
 [[ -f "$BACKUP_FILE.sha256" ]] || die "Backup checksum is missing: $BACKUP_FILE.sha256"
 
+acquire_deploy_lock
+
 backup_dir="$(cd "$(dirname "$BACKUP_FILE")" && pwd)"
 backup_base="$(basename "$BACKUP_FILE")"
-(
+if ! (
   cd "$backup_dir"
   sha256sum -c "$backup_base.sha256" >/dev/null
-) || die "Backup checksum verification failed."
+); then
+  die "Backup checksum verification failed."
+fi
 node "$SCRIPT_DIR/validate-data.js" "$BACKUP_FILE"
 
 service_present=0
@@ -62,21 +67,25 @@ swapped=0
 restore_succeeded=0
 
 rollback_restore() {
-  local rollback_ok=1 rollback_tmp
+  local rollback_ok=1 rollback_tmp=""
   log "Restore failed after data replacement; restoring the previous database."
 
+  if (( service_present == 1 && service_was_active == 1 )); then
+    if ! systemctl stop "$SERVICE_NAME"; then rollback_ok=0; fi
+  fi
+
   if (( had_original == 1 )) && [[ -n "$safety_backup" && -f "$safety_backup" ]]; then
-    rollback_tmp="$(mktemp "$data_dir/.rollback-XXXXXXXX.json")" || rollback_ok=0
-    if (( rollback_ok == 1 )); then
-      if ! cp -- "$safety_backup" "$rollback_tmp"; then rollback_ok=0; fi
+    if ! rollback_tmp="$(mktemp "$data_dir/.rollback-XXXXXXXX.json")"; then
+      rollback_ok=0
     fi
+    if (( rollback_ok == 1 )) && ! cp -- "$safety_backup" "$rollback_tmp"; then rollback_ok=0; fi
     if (( rollback_ok == 1 )); then
       chmod 600 "$rollback_tmp"
       if ! is_test_mode && ! chown "$SERVICE_USER:$SERVICE_GROUP" "$rollback_tmp"; then rollback_ok=0; fi
     fi
     if (( rollback_ok == 1 )) && ! node "$SCRIPT_DIR/validate-data.js" "$rollback_tmp"; then rollback_ok=0; fi
     if (( rollback_ok == 1 )) && ! mv -f -- "$rollback_tmp" "$DATA_FILE"; then rollback_ok=0; fi
-    if [[ -n "${rollback_tmp:-}" && -f "$rollback_tmp" ]]; then rm -f -- "$rollback_tmp"; fi
+    if [[ -n "$rollback_tmp" && -f "$rollback_tmp" ]]; then rm -f -- "$rollback_tmp"; fi
   elif (( had_original == 0 )); then
     if ! rm -f -- "$DATA_FILE"; then rollback_ok=0; fi
   fi
@@ -135,4 +144,6 @@ fi
 
 restore_succeeded=1
 printf 'Restored: %s\n' "$DATA_FILE"
-[[ -n "$safety_backup" ]] && printf 'Pre-restore safety backup: %s\n' "$safety_backup"
+if [[ -n "$safety_backup" ]]; then
+  printf 'Pre-restore safety backup: %s\n' "$safety_backup"
+fi
