@@ -235,7 +235,7 @@ validate_env_file() {
   local release_dir="$1"
   local env_file="$2"
   (
-    cd "$release_dir"
+    cd "$release_dir" || exit 1
     DOTENV_CONFIG_PATH="$env_file" node -r dotenv/config -e '
       const { loadConfig } = require("./src/modules/stream-notifier/config");
       loadConfig(process.env);
